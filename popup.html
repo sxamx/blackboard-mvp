@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Detector de contenido</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <div class="eyebrow">DUOC UC · BLACKBOARD</div>
+      <h1>Detector de contenido</h1>
+      <p class="intro">Muestra el contenido ya cargado. Descarga únicamente los archivos que marques y para los que Blackboard exponga un enlace directo.</p>
+
+      <button id="scan" class="primary" type="button">Detectar clases y archivos</button>
+      <section id="results" class="results" aria-live="polite">
+        <p class="muted">Aún no he leído la pestaña.</p>
+      </section>
+
+      <p id="selection-summary" class="selection-summary" role="status">0 archivos seleccionados.</p>
+      <label class="format-label" for="download-format">Formato de salida</label>
+      <select id="download-format">
+        <option value="folder">Carpeta del curso con subcarpetas por clase</option>
+        <option value="zip">Un ZIP con subcarpetas por clase</option>
+      </select>
+      <p class="format-help">Carpeta: cada archivo se descarga por separado dentro de Descargas/&lt;curso&gt;/&lt;clase&gt;; Edge mostrará una entrada por archivo. ZIP: un solo archivo (hasta 50 MB).</p>
+      <button id="download-selected" class="download" type="button" disabled>Descargar seleccionados</button>
+      <p id="status" class="status" role="status">Marcar casillas no descarga nada. La descarga inicia solo al pulsar el botón.</p>
+      <p class="footnote">v<span id="version"></span> · La selección se mantiene solo mientras este panel está abierto.</p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

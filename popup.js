@@ -4,12 +4,20 @@ const statusBox = document.getElementById("status");
 const selectionSummary = document.getElementById("selection-summary");
 const downloadButton = document.getElementById("download-selected");
 const downloadFormat = document.getElementById("download-format");
+const downloadJobPanel = document.getElementById("download-job");
+const jobSummary = document.getElementById("job-summary");
+const jobHelp = document.getElementById("job-help");
+const jobItemsBox = document.getElementById("job-items");
+const resumeJobButton = document.getElementById("resume-job");
+const refreshJobLinksButton = document.getElementById("refresh-job-links");
 document.getElementById("version").textContent = chrome.runtime.getManifest().version;
 let currentSelectionRecords = [];
 let currentTabId = null;
 let currentBlackboardHostname = "";
 let currentCourseName = "Curso";
 let downloadInProgress = false;
+let latestDownloadJob = null;
+let matchingRefreshLinks = [];
 
 function selectedFileRecords() {
   return currentSelectionRecords.filter((record) => record.checkbox.checked);
@@ -18,10 +26,53 @@ function selectedFileRecords() {
 function updateDownloadButton() {
   const selected = selectedFileRecords();
   downloadButton.textContent = downloadFormat.value === "zip" ? "Crear y descargar ZIP" : "Descargar seleccionados";
-  downloadButton.disabled = downloadInProgress || selected.length === 0 || selected.some((record) => !record.url);
+  const folderJobActive = downloadFormat.value === "folder" && latestDownloadJob && latestDownloadJob.status !== "complete";
+  downloadButton.disabled = downloadInProgress || Boolean(folderJobActive) || selected.length === 0 || selected.some((record) => !record.url);
 }
 
 downloadFormat.addEventListener("change", updateDownloadButton);
+
+resumeJobButton.addEventListener("click", async () => {
+  resumeJobButton.disabled = true;
+  jobHelp.textContent = "Intentando reanudar en Edge…";
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "resume-folder-download-job" });
+    if (!result?.ok) jobHelp.textContent = result?.error || "Edge no pudo reanudar el archivo.";
+    if (result?.job) renderDownloadJob(result.job);
+    else await refreshDownloadJob();
+  } catch (error) {
+    jobHelp.textContent = error.message || "No pude reanudar el archivo.";
+  } finally {
+    resumeJobButton.disabled = false;
+  }
+});
+
+refreshJobLinksButton.addEventListener("click", async () => {
+  if (!matchingRefreshLinks.length) return;
+  refreshJobLinksButton.disabled = true;
+  jobHelp.textContent = "Actualizando enlaces temporales de esta sesión…";
+  try {
+    const result = await chrome.runtime.sendMessage({
+      type: "refresh-folder-download-links",
+      links: matchingRefreshLinks.map(({ itemId, url }) => ({ itemId, url }))
+    });
+    if (!result?.ok) jobHelp.textContent = result?.error || "No pude actualizar los enlaces.";
+    if (result?.job) renderDownloadJob(result.job);
+    else await refreshDownloadJob();
+    if (result?.ok) statusBox.textContent = `Actualicé ${result.updated} enlace(s). La cola continúa desde el primer archivo pendiente.`;
+  } catch (error) {
+    jobHelp.textContent = error.message || "No pude actualizar los enlaces.";
+  } finally {
+    refreshJobLinksButton.disabled = false;
+  }
+});
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type === "folder-download-job-updated") renderDownloadJob(message.job || null);
+});
+
+void refreshDownloadJob();
+window.setInterval(() => void refreshDownloadJob(), 1200);
 
 function inspectClassInventory() {
   const detected = new Map();
@@ -261,6 +312,7 @@ scanButton.addEventListener("click", async () => {
       func: inspectClassInventory
     });
     renderResult(result?.result || { pageTitle: "Título no visible", courseName: "Curso", classes: [], filesWithoutClass: [], fileCount: 0 });
+    void refreshDownloadJob();
   } catch (error) {
     resultsBox.replaceChildren();
     const message = document.createElement("p");
@@ -271,6 +323,7 @@ scanButton.addEventListener("click", async () => {
     selectionSummary.textContent = "0 archivos seleccionados.";
     updateDownloadButton();
     statusBox.textContent = "No se modificó el curso.";
+    void refreshDownloadJob();
   } finally {
     scanButton.disabled = false;
   }
@@ -317,16 +370,133 @@ async function downloadSelectedAsFolders(selected) {
   const files = selected.map((record) => {
     const url = getDownloadUrl(record);
     const filename = `${courseFolder}/${sanitizePathSegment(record.folder)}/${sanitizePathSegment(record.name)}`;
-    return { url: url.href, filename };
+    return { url: url.href, filename, name: record.name, folder: record.folder };
   });
-  statusBox.textContent = "Iniciando descargas en carpetas por curso y clase…";
-  const result = await chrome.runtime.sendMessage({ type: "download-blackboard-files", files });
-  if (!result?.ok) throw new Error(result?.error || "No pude iniciar las descargas en carpetas.");
-  statusBox.textContent = result.misplaced.length
-    ? `El navegador cambió la carpeta de ${result.misplaced.length} archivo(s). Ruta real: ${result.misplaced[0].actual}`
-    : result.failures.length
-      ? `Inicié ${result.started} de ${selected.length} archivos en ${selectedClasses.length} clase(s) (${classLabel}); ${result.failures.length} no iniciaron.`
-      : `Inicié ${result.started} archivo(s) individual(es) en ${selectedClasses.length} clase(s): ${classLabel}. Edge los muestra como entradas separadas; usa «Mostrar en carpeta» para comprobar Descargas/${courseFolder}.`;
+  statusBox.textContent = "Guardando la cola de descargas…";
+  const result = await chrome.runtime.sendMessage({
+    type: "start-folder-download-job",
+    courseName: currentCourseName,
+    files
+  });
+  if (!result?.ok) throw new Error(result?.error || "No pude iniciar la cola de descargas.");
+  if (result.job) renderDownloadJob(result.job);
+  statusBox.textContent = result.job?.items?.[0]?.status === "needs-link"
+    ? "Guardé la cola, pero Edge no pudo iniciar el primer archivo. Revisa el estado y actualiza su enlace."
+    : `Cola iniciada: ${selected.length} archivo(s) para ${selectedClasses.length} clase(s) (${classLabel}). Se procesan uno a uno; el progreso queda guardado en este equipo.`;
+}
+
+async function refreshDownloadJob() {
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "get-folder-download-job" });
+    if (result?.ok) renderDownloadJob(result.job || null);
+  } catch {}
+}
+
+function renderDownloadJob(job) {
+  latestDownloadJob = job;
+  matchingRefreshLinks = job ? findRefreshableLinks(job) : [];
+  if (!job) {
+    downloadJobPanel.hidden = true;
+    updateDownloadButton();
+    return;
+  }
+
+  downloadJobPanel.hidden = false;
+  const total = job.items.length;
+  const completed = job.items.filter((item) => item.status === "complete").length;
+  const active = job.items.find((item) => item.status === "downloading" || item.status === "starting");
+  const resumable = job.items.filter((item) => item.canResume && ["paused", "interrupted"].includes(item.status));
+  const needsLinks = job.items.filter((item) => item.status === "needs-link");
+  jobSummary.textContent = `${job.courseName}: ${completed} de ${total} archivo(s) completados.`;
+
+  if (job.status === "complete") {
+    jobHelp.textContent = "La cola terminó. Puedes iniciar otra descarga cuando quieras.";
+  } else if (active) {
+    const received = Number(active.bytesReceived) || 0;
+    const totalBytes = Number(active.totalBytes);
+    const percent = totalBytes > 0 ? ` (${Math.min(100, Math.floor(received / totalBytes * 100))}%)` : "";
+    jobHelp.textContent = `Descargando ${active.name}${percent}. Puedes cerrar este panel; la cola sigue en Edge.`;
+  } else if (resumable.length) {
+    jobHelp.textContent = `${resumable.length} archivo(s) se pueden reanudar desde donde se interrumpieron.`;
+  } else if (needsLinks.length && matchingRefreshLinks.length) {
+    jobHelp.textContent = `Detecté enlaces para ${matchingRefreshLinks.length} de ${needsLinks.length} archivo(s) pendientes. Pulsa el botón para reanudar la cola.`;
+  } else if (needsLinks.length) {
+    jobHelp.textContent = `Faltan enlaces para ${needsLinks.length} archivo(s). Abre Blackboard, detecta el contenido y expande las clases pendientes.`;
+  } else {
+    jobHelp.textContent = "La cola está esperando que Edge actualice el estado de la descarga.";
+  }
+
+  resumeJobButton.hidden = !resumable.length;
+  resumeJobButton.textContent = resumable.length > 1
+    ? `Reanudar archivo interrumpido (${resumable.length})`
+    : "Reanudar archivo interrumpido";
+  refreshJobLinksButton.hidden = !matchingRefreshLinks.length;
+  refreshJobLinksButton.textContent = `Actualizar enlaces pendientes (${matchingRefreshLinks.length})`;
+
+  const previousScrollTop = jobItemsBox.scrollTop;
+  jobItemsBox.replaceChildren();
+  for (const item of job.items) {
+    const listItem = document.createElement("li");
+    const row = document.createElement("div");
+    row.className = "job-item-row";
+    const name = document.createElement("span");
+    name.className = "job-item-name";
+    name.textContent = `${item.folder} · ${item.name}`;
+    const state = document.createElement("span");
+    state.className = "job-item-status";
+    state.textContent = jobItemStatus(item);
+    if (item.pathChanged) state.title = "Edge guardó este archivo en otra carpeta.";
+    row.append(name, state);
+    listItem.append(row);
+
+    if (["downloading", "paused"].includes(item.status)) {
+      const progress = document.createElement("progress");
+      progress.className = "job-item-progress";
+      progress.max = 1;
+      if (Number(item.totalBytes) > 0) progress.value = Math.min(1, (Number(item.bytesReceived) || 0) / Number(item.totalBytes));
+      listItem.append(progress);
+    }
+    jobItemsBox.append(listItem);
+  }
+  jobItemsBox.scrollTop = previousScrollTop;
+  updateDownloadButton();
+}
+
+function findRefreshableLinks(job) {
+  if (normalizeMatch(currentCourseName) !== normalizeMatch(job.courseName)) return [];
+  const pending = job.items.filter((item) => item.status === "needs-link");
+  const available = currentSelectionRecords.filter((record) => record.url);
+  const used = new Set();
+  const matches = [];
+
+  for (const item of pending) {
+    const record = available.find((candidate) => !used.has(candidate)
+      && normalizeMatch(candidate.name) === normalizeMatch(item.name)
+      && normalizeMatch(candidate.folder) === normalizeMatch(item.folder));
+    if (!record) continue;
+    try {
+      matches.push({ itemId: item.id, url: getDownloadUrl(record).href });
+      used.add(record);
+    } catch {}
+  }
+  return matches;
+}
+
+function normalizeMatch(value) {
+  return String(value || "").normalize("NFC").trim().toLocaleLowerCase();
+}
+
+function jobItemStatus(item) {
+  const labels = {
+    pending: "Pendiente",
+    starting: "Iniciando",
+    downloading: "Descargando",
+    paused: "Pausado",
+    interrupted: "Interrumpido",
+    "needs-link": "Requiere enlace",
+    complete: "Completado"
+  };
+  return item.pathChanged ? `${labels[item.status] || item.status} · ruta cambiada` : labels[item.status] || item.status;
 }
 
 function summarizeClassNames(names) {

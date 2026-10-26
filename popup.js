@@ -69,6 +69,7 @@ openClassesButton.addEventListener("click", async () => {
     if (result.opened) parts.push(`${result.opened} abierta(s)`);
     if (result.alreadyOpen) parts.push(`${result.alreadyOpen} ya estaba(n) abierta(s)`);
     if (result.missing) parts.push(`${result.missing} no encontrada(s)`);
+    if (result.failed) parts.push(`${result.failed} no se pudo expandir`);
     openClassesStatus.textContent = `${parts.join(", ")}. Actualizando archivos visibles…`;
     await new Promise((resolve) => window.setTimeout(resolve, 450));
     scanButton.click();
@@ -800,48 +801,67 @@ async function expandSelectedBlackboardFolders(requestedNames) {
   const parentAnalyticsId = "course.learningModule.tableOfContents.folder.list.folder.item.list-item-parent";
   const scope = document.querySelector(".js-content-navigation-drawer") || document;
   const normalize = (value) => String(value || "").normalize("NFC").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+  const classNumber = (value) => String(value || "").match(/\bCLASE\s+(?:N\s*[°ºo.]?\s*)?(\d{1,3})\b/i)?.[1] || "";
+  const parentSelector = `[data-analytics-id="${parentAnalyticsId}"]`;
+  const rowSelector = `li[data-analytics-id="${analyticsId}"]`;
   let opened = 0;
   let alreadyOpen = 0;
   let missing = 0;
+  let failed = 0;
 
-  for (const requestedName of requestedNames) {
+  function findFolderControl(requestedName) {
     const target = normalize(requestedName);
-    const rows = [...scope.querySelectorAll(`li[data-analytics-id="${analyticsId}"]`)];
-    const row = rows.find((candidate) => {
-      const labels = [candidate.innerText || candidate.textContent || ""];
-      for (const element of candidate.querySelectorAll("[title], [aria-label]")) {
+    const requestedNumber = classNumber(requestedName);
+    return [...scope.querySelectorAll(parentSelector)].find((control) => {
+      const row = control.closest(rowSelector) || control.closest("li");
+      const labels = [control.innerText || control.textContent || "", row?.innerText || row?.textContent || ""];
+      for (const element of (row || control).querySelectorAll("[title], [aria-label]")) {
         labels.push(element.getAttribute("title") || "", element.getAttribute("aria-label") || "");
       }
-      return labels.some((label) => normalize(label).includes(target));
-    });
-    if (!row) {
-      missing += 1;
-      continue;
-    }
+      return labels.some((label) => normalize(label).includes(target)
+        || Boolean(requestedNumber && classNumber(label) === requestedNumber));
+    }) || null;
+  }
 
-    const collapse = row.nextElementSibling;
-    if (!collapse || !collapse.classList.contains("MuiCollapse-root")) {
-      missing += 1;
-      continue;
-    }
-    const isCollapsed = collapse.classList.contains("MuiCollapse-hidden") || collapse.getAttribute("aria-hidden") === "true";
-    if (!isCollapsed) {
-      alreadyOpen += 1;
-      continue;
-    }
+  function folderCollapse(control) {
+    const row = control?.closest(rowSelector) || control?.closest("li");
+    const sibling = row?.nextElementSibling;
+    return sibling?.classList.contains("MuiCollapse-root") ? sibling : null;
+  }
 
-    const parent = row.querySelector(`div[role="button"][data-analytics-id="${parentAnalyticsId}"]`);
+  function isCollapsed(collapse) {
+    if (!collapse) return false;
+    if (collapse.classList.contains("MuiCollapse-hidden")) return true;
+    const style = window.getComputedStyle(collapse);
+    return style.display === "none" || (collapse.offsetHeight === 0 && style.height === "0px");
+  }
+
+  for (const requestedName of requestedNames) {
+    const parent = findFolderControl(requestedName);
     if (!parent) {
       missing += 1;
       continue;
     }
+
+    const collapse = folderCollapse(parent);
+    if (!collapse) {
+      missing += 1;
+      continue;
+    }
+    if (!isCollapsed(collapse)) {
+      alreadyOpen += 1;
+      continue;
+    }
+
     parent.click();
-    opened += 1;
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await new Promise((resolve) => window.setTimeout(resolve, 120));
+    const updatedControl = findFolderControl(requestedName);
+    if (updatedControl && !isCollapsed(folderCollapse(updatedControl))) opened += 1;
+    else failed += 1;
   }
 
-  await new Promise((resolve) => window.setTimeout(resolve, 350));
-  return { ok: true, opened, alreadyOpen, missing };
+  if (opened || alreadyOpen) await new Promise((resolve) => window.setTimeout(resolve, 350));
+  return { ok: true, opened, alreadyOpen, missing, failed };
 }
 
 function renderResult(result) {

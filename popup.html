@@ -27,105 +27,101 @@
           <span>Clases</span><span id="classes-tab-count" class="tab-count" hidden></span>
         </button>
         <button id="tab-queue" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="queue-view" tabindex="-1">
-          <span>Cola</span><span id="queue-tab-count" class="tab-count" hidden></span>
+          <span>Cola</span><span id="queue-tab-indicator" class="tab-indicator" hidden></span>
         </button>
       </nav>
 
       <main class="view-viewport">
-        <section id="classes-view" class="view-panel" role="tabpanel" aria-labelledby="tab-classes">
-          <section class="scan-card">
-            <div id="scan-welcome" class="scan-welcome">
+        <section id="classes-view" class="view-panel classes-view" role="tabpanel" aria-labelledby="tab-classes">
+          <div id="class-scroll" class="class-scroll">
+            <section id="scan-welcome" class="scan-welcome">
               <h2>Abre la lista de contenido de tu curso</h2>
-              <p>El detector lee las carpetas de clase que Blackboard ya muestra y te deja elegir qué descargar, ordenado por clase.</p>
+              <p>El detector lee las carpetas «CLASE N°…» que Blackboard ya muestra y te deja elegir qué descargar, ordenado por clase.</p>
               <ol class="quick-steps">
                 <li><span>1</span><span>Entra al curso y deja visible la lista de contenido.</span></li>
                 <li><span>2</span><span>Pulsa <strong>Detectar clases y archivos</strong>.</span></li>
-                <li><span>3</span><span>Marca los archivos y elige cómo organizarlos.</span></li>
+                <li><span>3</span><span>Marca los archivos y elige carpeta o ZIP.</span></li>
               </ol>
               <p class="privacy-note">Todo ocurre en tu navegador. Nada se descarga hasta que pulses el botón de descarga.</p>
+            </section>
+
+            <div id="class-workspace" class="class-workspace" hidden>
+              <div class="class-toolbar">
+                <div id="select-visible-host" class="select-visible-host"></div>
+                <button id="scan-again" class="scan-small" type="button">Detectar</button>
+              </div>
+              <section id="results" class="results" aria-live="polite"></section>
             </div>
-            <button id="scan" class="primary scan-button" type="button">Detectar clases y archivos</button>
-          </section>
+          </div>
 
-          <div id="class-workspace" class="class-workspace" hidden>
-            <section id="class-opener" class="surface-card class-opener" hidden>
-              <div class="section-heading">
-                <div>
-                  <h2>Abrir clases</h2>
-                  <p class="muted">Expande las carpetas seleccionadas en Blackboard para cargar sus archivos.</p>
+          <footer id="scan-footer" class="sticky-footer scan-footer">
+            <p class="scan-footer-summary">0 archivos seleccionados</p>
+            <button id="scan-start" class="primary" type="button">
+              <span class="button-icon" aria-hidden="true">↻</span>Detectar clases y archivos
+            </button>
+          </footer>
+
+          <footer id="download-panel" class="sticky-footer download-panel" aria-label="Opciones de descarga" hidden>
+            <div class="selection-summary-row">
+              <span id="selection-summary" class="selection-summary" role="status">0 archivos · 0 clases</span>
+              <span id="visible-count" class="visible-count">0 visibles</span>
+            </div>
+            <select id="download-format" class="visually-hidden" tabindex="-1" aria-hidden="true">
+              <option value="folder">Carpeta por clase</option>
+              <option value="zip">ZIP</option>
+              <option value="loose">Archivos sueltos</option>
+            </select>
+            <div class="format-options" role="group" aria-label="Formato de descarga">
+              <button class="format-option is-selected" type="button" data-format="folder" aria-pressed="true">Carpeta por clase</button>
+              <button class="format-option" type="button" data-format="zip" aria-pressed="false">ZIP</button>
+              <button class="format-option" type="button" data-format="loose" aria-pressed="false">Archivos sueltos</button>
+            </div>
+            <p id="format-help" class="format-help">Carpeta: una subcarpeta por clase. Edge puede pedir Guardar por cada archivo.</p>
+            <button id="download-selected" class="download-button" type="button" disabled>
+              <span class="button-icon" aria-hidden="true">↓</span>Descargar 0 archivos
+            </button>
+            <button id="open-classes-button" class="open-classes-button" type="button" disabled>Abrir 0 clases</button>
+            <p id="status" class="inline-status" role="status"></p>
+          </footer>
+        </section>
+
+        <section id="queue-view" class="view-panel queue-view" role="tabpanel" aria-labelledby="tab-queue" hidden>
+          <div class="queue-scroll">
+            <section id="queue-empty" class="empty-queue">
+              <div class="empty-queue-icon" aria-hidden="true">↓</div>
+              <h2>Aún no hay descargas</h2>
+              <p>Cuando envíes archivos a Edge, aquí verás el avance agrupado por clase y podrás reanudar lo interrumpido.</p>
+              <p id="queue-status" class="inline-status" role="status"></p>
+              <button id="queue-go-classes" class="secondary action-button" type="button">Ir a clases</button>
+            </section>
+
+            <section id="download-job" class="download-job" aria-live="polite" hidden>
+              <div class="job-summary-card">
+                <div class="job-heading">
+                  <div>
+                    <h2>Cola de descargas</h2>
+                    <p id="job-summary" class="job-summary"></p>
+                  </div>
+                  <span id="job-status-badge" class="job-badge"></span>
                 </div>
-                <span id="open-class-count" class="count-pill"></span>
+                <div class="progress-label-row"><strong>Progreso general</strong><span id="job-progress-label">0%</span></div>
+                <progress id="job-progress" class="job-progress" max="1" value="0" aria-label="Progreso de la cola"></progress>
+                <p id="job-help" class="job-help"></p>
               </div>
-              <label class="select-all-row opener-select-all">
-                <input id="open-all-classes" type="checkbox">
-                <span>Seleccionar todas las clases</span>
-              </label>
-              <ul id="open-class-list" class="open-class-list"></ul>
-              <button id="open-classes-button" class="secondary action-button" type="button" disabled>Abrir clases seleccionadas</button>
-              <p id="open-classes-status" class="inline-status" role="status"></p>
-            </section>
-
-            <section id="results" class="surface-card results" aria-live="polite" hidden>
-              <p class="muted">Aún no he leído la pestaña.</p>
-            </section>
-
-            <section id="download-panel" class="download-panel surface-card" aria-label="Opciones de descarga" hidden>
-              <div class="selection-summary-row">
-                <span id="selection-summary" class="selection-summary" role="status">0 archivos seleccionados.</span>
-              </div>
-              <div class="format-heading">
-                <span>Formato de descarga</span>
-              </div>
-              <select id="download-format" class="visually-hidden" tabindex="-1" aria-hidden="true">
-                <option value="folder">Carpeta por clase</option>
-                <option value="zip">Un ZIP con subcarpetas por clase</option>
-                <option value="loose">Archivos sueltos</option>
-              </select>
-              <div class="format-options" role="group" aria-label="Formato de descarga">
-                <button class="format-option is-selected" type="button" data-format="folder" aria-pressed="true">Carpeta por clase</button>
-                <button class="format-option" type="button" data-format="zip" aria-pressed="false">ZIP</button>
-                <button class="format-option" type="button" data-format="loose" aria-pressed="false">Archivos sueltos</button>
-              </div>
-              <p id="format-help" class="format-help">Una subcarpeta por clase. Edge puede pedir Guardar por cada archivo.</p>
-              <button id="download-selected" class="download-button" type="button" disabled>Descargar seleccionados</button>
-              <p id="status" class="inline-status" role="status">Marcar casillas no descarga nada. La descarga inicia solo al pulsar el botón.</p>
+              <button id="resume-job" class="resume-button" type="button" hidden>Reanudar archivo interrumpido</button>
+              <h3 class="queue-list-heading">Clases en cola</h3>
+              <ul id="job-items" class="job-items"></ul>
             </section>
           </div>
-        </section>
 
-        <section id="queue-view" class="view-panel" role="tabpanel" aria-labelledby="tab-queue" hidden>
-          <section id="queue-empty" class="surface-card empty-queue">
-            <div class="empty-queue-icon" aria-hidden="true">↓</div>
-            <h2>Aún no hay descargas</h2>
-            <p class="muted">Cuando envíes archivos a Edge, aquí verás el avance de cada clase y podrás reanudar lo que se interrumpa.</p>
-            <p id="queue-status" class="inline-status" role="status"></p>
-            <button id="queue-go-classes" class="secondary action-button" type="button">Ir a clases</button>
-          </section>
-
-          <section id="download-job" class="surface-card download-job" aria-live="polite" hidden>
-            <div class="job-heading">
-              <div>
-                <h2>Cola de descargas</h2>
-                <p id="job-summary" class="job-summary"></p>
-              </div>
-              <span id="job-status-badge" class="job-badge"></span>
-            </div>
-            <div class="progress-label-row"><span>Progreso general</span><span id="job-progress-label">0%</span></div>
-            <progress id="job-progress" class="job-progress" max="1" value="0" aria-label="Progreso de la cola"></progress>
-            <p id="job-help" class="muted job-help"></p>
-            <h3 class="queue-list-heading">Clases en cola</h3>
-            <ul id="job-items" class="job-items"></ul>
-            <div class="job-actions">
-              <button id="resume-job" class="secondary action-button" type="button" hidden>Reanudar archivos interrumpidos</button>
-              <button id="refresh-job-links" class="secondary action-button" type="button" hidden>Actualizar enlaces pendientes</button>
-              <button id="clear-job" class="danger-button" type="button">Cancelar y eliminar cola</button>
-              <p class="job-delete-help">Los archivos completados se conservan. Si Edge tiene una ventana Guardar abierta, ciérrala también.</p>
-            </div>
-          </section>
+          <footer id="queue-footer" class="queue-footer" hidden>
+            <div class="queue-footer-summary"><span id="queue-footer-status"></span><span id="queue-format-label"></span></div>
+            <button id="refresh-job-links" class="refresh-links-button" type="button" hidden>Actualizar enlaces pendientes</button>
+            <button id="clear-job" class="danger-button" type="button">Cancelar y eliminar cola</button>
+            <p class="job-delete-help">Los archivos completados se conservan. Si Edge tiene abierta una ventana Guardar, ciérrala también.</p>
+          </footer>
         </section>
       </main>
-
-      <footer class="app-footer"><span>La selección es temporal.</span><span>·</span><span>La cola de archivos se guarda en este equipo.</span></footer>
     </div>
     <script src="popup.js"></script>
   </body>

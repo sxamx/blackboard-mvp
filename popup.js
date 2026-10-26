@@ -71,8 +71,12 @@ openClassesButton.addEventListener("click", async () => {
     if (result.missing) parts.push(`${result.missing} no encontrada(s)`);
     if (result.failed) parts.push(`${result.failed} no se pudo expandir`);
     openClassesStatus.textContent = `${parts.join(", ")}. Actualizando archivos visibles…`;
-    await new Promise((resolve) => window.setTimeout(resolve, 450));
-    scanButton.click();
+    if (result.opened || result.alreadyOpen) {
+      await new Promise((resolve) => window.setTimeout(resolve, 450));
+      scanButton.click();
+    } else {
+      openClassesStatus.textContent = `${parts.join(", ")}. No pude localizar un control de carpeta; revisa los logs [DuocClassOpener] en la consola de Blackboard.`;
+    }
   } catch (error) {
     openClassesStatus.textContent = error.message || "No pude abrir las clases seleccionadas.";
   } finally {
@@ -800,17 +804,20 @@ async function expandSelectedBlackboardFolders(requestedNames) {
   const logPrefix = "[DuocClassOpener]";
   const analyticsId = "course.learningModule.tableOfContents.folder.list.folder.item.list-item";
   const parentAnalyticsId = "course.learningModule.tableOfContents.folder.list.folder.item.list-item-parent";
+  const currentFolderAnalyticsId = "content.item.folder.toggleFolder.button";
   const drawer = document.querySelector(".js-content-navigation-drawer");
-  const scope = drawer || document;
+  const scope = document;
   const normalize = (value) => String(value || "").normalize("NFC").replace(/\s+/g, " ").trim().toLocaleLowerCase();
   const classNumber = (value) => String(value || "").match(/\bCLASE\s+(?:N\s*[°ºo.]?\s*)?(\d{1,3})\b/i)?.[1] || "";
-  const parentSelector = `[data-analytics-id="${parentAnalyticsId}"]`;
+  const currentControlSelector = `button[data-analytics-id="${currentFolderAnalyticsId}"]`;
+  const legacyControlSelector = `[data-analytics-id="${parentAnalyticsId}"]`;
   const rowSelector = `li[data-analytics-id="${analyticsId}"]`;
   console.info(logPrefix, "inicio", {
     requestedCount: requestedNames.length,
     drawerFound: Boolean(drawer),
-    folderRows: scope.querySelectorAll(rowSelector).length,
-    folderControls: scope.querySelectorAll(parentSelector).length
+    legacyFolderRows: drawer?.querySelectorAll(rowSelector).length || 0,
+    legacyFolderControls: drawer?.querySelectorAll(legacyControlSelector).length || 0,
+    contentFolderControls: scope.querySelectorAll(currentControlSelector).length
   });
   let opened = 0;
   let alreadyOpen = 0;
@@ -820,8 +827,14 @@ async function expandSelectedBlackboardFolders(requestedNames) {
   function findFolderControl(requestedName) {
     const target = normalize(requestedName);
     const requestedNumber = classNumber(requestedName);
-    return [...scope.querySelectorAll(parentSelector)].find((control) => {
-      const row = control.closest(rowSelector) || control.closest("li");
+    const controls = [
+      ...scope.querySelectorAll(currentControlSelector),
+      ...(drawer?.querySelectorAll(legacyControlSelector) || [])
+    ];
+    return controls.find((control) => {
+      const row = control.matches(currentControlSelector)
+        ? control.closest(".content-list-item")
+        : control.closest(rowSelector) || control.closest("li");
       const labels = [control.innerText || control.textContent || "", row?.innerText || row?.textContent || ""];
       for (const element of (row || control).querySelectorAll("[title], [aria-label]")) {
         labels.push(element.getAttribute("title") || "", element.getAttribute("aria-label") || "");
@@ -832,6 +845,7 @@ async function expandSelectedBlackboardFolders(requestedNames) {
   }
 
   function folderCollapse(control) {
+    if (control?.matches(currentControlSelector)) return null;
     const row = control?.closest(rowSelector) || control?.closest("li");
     const sibling = row?.nextElementSibling;
     return sibling?.classList.contains("MuiCollapse-root") ? sibling : null;
@@ -844,53 +858,69 @@ async function expandSelectedBlackboardFolders(requestedNames) {
     return style.display === "none" || (collapse.offsetHeight === 0 && style.height === "0px");
   }
 
+  function expandedState(control) {
+    const value = control?.getAttribute("aria-expanded");
+    if (value === "true") return true;
+    if (value === "false") return false;
+    const collapse = folderCollapse(control);
+    return collapse ? !isCollapsed(collapse) : null;
+  }
+
   function describeState(control) {
     const collapse = folderCollapse(control);
-    const collapseText = collapse?.innerText || collapse?.textContent || "";
+    const row = control?.matches(currentControlSelector)
+      ? control.closest(".content-list-item")
+      : control?.closest(rowSelector) || control?.closest("li");
+    const observedArea = collapse || row;
+    const observedText = observedArea?.innerText || observedArea?.textContent || "";
     const style = collapse ? window.getComputedStyle(collapse) : null;
     return {
       controlFound: Boolean(control),
-      rowFound: Boolean(control?.closest(rowSelector) || control?.closest("li")),
+      controlAnalytics: control?.getAttribute("data-analytics-id") || "",
+      rowFound: Boolean(row),
       collapseFound: Boolean(collapse),
-      expanded: collapse ? !isCollapsed(collapse) : false,
+      ariaExpanded: control?.getAttribute("aria-expanded"),
+      expanded: expandedState(control),
       collapseClasses: collapse?.className || "",
       height: style?.height || "",
-      childCount: collapse?.children.length || 0,
-      loadingIndicator: Boolean(collapse?.querySelector('[data-testid*="skeleton" i], [aria-label*="cargando" i]'))
-        || /\bcargando\b|\bloading\b/i.test(collapseText),
-      textLength: collapseText.length
+      childCount: observedArea?.children.length || 0,
+      loadingIndicator: Boolean(observedArea?.querySelector('[data-testid*="skeleton" i], [aria-label*="cargando" i]'))
+        || /\bcargando\b|\bloading\b/i.test(observedText),
+      textLength: observedText.length
     };
   }
 
   for (let index = 0; index < requestedNames.length; index += 1) {
     const requestedName = requestedNames[index];
     const classId = classNumber(requestedName) || `selección-${index + 1}`;
-    const parent = findFolderControl(requestedName);
-    if (!parent) {
+    const control = findFolderControl(requestedName);
+    if (!control) {
       missing += 1;
       console.warn(logPrefix, "control-no-encontrado", { classId });
       continue;
     }
 
-    const collapse = folderCollapse(parent);
-    if (!collapse) {
-      missing += 1;
-      console.warn(logPrefix, "panel-no-encontrado", { classId, state: describeState(parent) });
-      continue;
-    }
-    console.info(logPrefix, "antes-del-clic", { classId, state: describeState(parent) });
-    if (!isCollapsed(collapse)) {
+    console.info(logPrefix, "antes-del-clic", { classId, state: describeState(control) });
+    if (expandedState(control) === true) {
       alreadyOpen += 1;
       console.info(logPrefix, "ya-estaba-abierta", { classId });
       continue;
     }
 
-    parent.click();
-    console.info(logPrefix, "clic-enviado", { classId });
-    await new Promise((resolve) => window.setTimeout(resolve, 120));
-    const updatedControl = findFolderControl(requestedName);
+    control.click();
+    console.info(logPrefix, "clic-enviado", {
+      classId,
+      controlAnalytics: control.getAttribute("data-analytics-id") || ""
+    });
+    const deadline = Date.now() + 1800;
+    let updatedControl = null;
+    while (Date.now() < deadline) {
+      updatedControl = findFolderControl(requestedName);
+      if (expandedState(updatedControl) === true) break;
+      await new Promise((resolve) => window.setTimeout(resolve, 60));
+    }
     const state = describeState(updatedControl);
-    if (updatedControl && state.expanded) {
+    if (updatedControl && expandedState(updatedControl) === true) {
       opened += 1;
       console.info(logPrefix, "despues-del-clic", { classId, state });
     } else {

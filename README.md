@@ -28,7 +28,7 @@ Al actualizar la extensión, Edge o Chrome puede pedir que aceptes los permisos 
 2. En Edge abre `edge://extensions`; en Chrome abre `chrome://extensions`.
 3. Activa **Modo de desarrollador**.
 4. Selecciona **Cargar descomprimida** y elige la carpeta `blackboard-mvp`. Si Edge ofrece **Recargar** para la extensión existente, púlsalo y acepta los permisos `downloads` y `storage` si los solicita.
-5. Abre el panel de la extensión y confirma que abajo indique la versión `0.10.2`.
+5. Abre el panel de la extensión y confirma que abajo indique la versión `0.10.3`.
 
 ## Probar
 

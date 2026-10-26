@@ -1185,7 +1185,7 @@ function renderResult(result, { preserveOpenNames = [] } = {}) {
   selectAllRow.className = "select-visible-row";
   const selectAll = document.createElement("input");
   selectAll.type = "checkbox";
-  selectAll.disabled = (Number(result.fileCount) || 0) === 0;
+  selectAll.disabled = true;
   const selectAllText = document.createElement("span");
   selectAllText.textContent = "Seleccionar visibles";
   selectAllRow.append(selectAll, selectAllText);
@@ -1193,6 +1193,10 @@ function renderResult(result, { preserveOpenNames = [] } = {}) {
 
   const list = document.createElement("ul");
   list.className = "tree";
+
+  function visibleFileRecords() {
+    return fileSelectionRecords.filter((record) => record.container && !record.container.hidden);
+  }
 
   function updateSelectionSummary() {
     for (const group of groupStates) {
@@ -1203,14 +1207,17 @@ function renderResult(result, { preserveOpenNames = [] } = {}) {
     const selectedClasses = new Set(selected
       .filter((record) => record.folder !== "Archivos sin clase identificada")
       .map((record) => record.folder));
+    const visibleRecords = visibleFileRecords();
+    const selectableVisible = visibleRecords.filter((record) => record.url);
+    const selectedVisible = selectableVisible.filter((record) => record.checkbox.checked).length;
     selectionSummary.textContent = selected.length + " " + (selected.length === 1 ? "archivo" : "archivos") + " · "
       + selectedClasses.size + " " + (selectedClasses.size === 1 ? "clase" : "clases");
-    visibleCount.textContent = fileSelectionRecords.length + " visibles";
-    selectAll.checked = fileSelectionRecords.length > 0 && selected.length === fileSelectionRecords.length;
-    selectAll.indeterminate = selected.length > 0 && selected.length < fileSelectionRecords.length;
+    visibleCount.textContent = visibleRecords.length + " archivos visibles";
+    selectAll.disabled = selectableVisible.length === 0;
+    selectAll.checked = selectableVisible.length > 0 && selectedVisible === selectableVisible.length;
+    selectAll.indeterminate = selectedVisible > 0 && selectedVisible < selectableVisible.length;
     updateDownloadButton();
   }
-
   function addGroup(title, files, options = {}) {
     const folder = options.folder || title;
     const openable = options.openable !== false;
@@ -1279,10 +1286,12 @@ function renderResult(result, { preserveOpenNames = [] } = {}) {
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
       checkbox.className = "file-checkbox";
+      checkbox.disabled = !fileUrl;
       checkbox.setAttribute("aria-label", "Seleccionar " + fileName);
+      if (!fileUrl) checkbox.title = "No hay enlace directo para descargar este archivo.";
       checkbox.addEventListener("change", updateSelectionSummary);
       childCheckboxes.push(checkbox);
-      fileSelectionRecords.push({ checkbox, name: fileName, folder, url: fileUrl, mode: fileMode });
+      fileSelectionRecords.push({ checkbox, name: fileName, folder, url: fileUrl, mode: fileMode, container: children });
 
       const type = fileTypeBadge(fileName);
       const icon = document.createElement("span");
@@ -1306,6 +1315,7 @@ function renderResult(result, { preserveOpenNames = [] } = {}) {
       toggle.textContent = children.hidden ? "›" : "⌄";
       toggle.setAttribute("aria-expanded", String(!children.hidden));
       toggle.setAttribute("aria-label", (children.hidden ? "Expandir " : "Contraer ") + title);
+      updateSelectionSummary();
     });
     item.append(row, children);
     list.append(item);
@@ -1326,7 +1336,9 @@ function renderResult(result, { preserveOpenNames = [] } = {}) {
     });
   }
   selectAll.addEventListener("change", () => {
-    for (const record of fileSelectionRecords) record.checkbox.checked = selectAll.checked;
+    for (const record of visibleFileRecords()) {
+      if (record.url) record.checkbox.checked = selectAll.checked;
+    }
     updateSelectionSummary();
   });
   resultsBox.append(list);

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Detector de clases Blackboard Duoc",
-  "version": "0.12.1",
+  "version": "0.12.2",
   "description": "Detecta y descarga archivos de Blackboard por clase, en carpetas, archivos sueltos o ZIP.",
   "permissions": [
     "activeTab",

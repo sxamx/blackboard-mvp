@@ -176,3 +176,103 @@ input[type="checkbox"] { accent-color: #1457c5; }
 .download-status.ready { color: #167448; }
 .download-status.missing { color: #94702e; }
 .unassigned-group > .tree-row { color: #6c4b10; }
+
+/* Popup polish */
+body { width: 400px; background: #f3f6fb; }
+main { padding: 15px; }
+.app-header { display: flex; align-items: center; gap: 11px; }
+.brand-mark {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: none;
+  place-items: center;
+  border-radius: 12px;
+  background: #1457c5;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  box-shadow: 0 4px 10px #1457c52b;
+}
+.header-copy { min-width: 0; }
+.eyebrow { color: #60718b; font-size: 9px; letter-spacing: .1em; }
+h1 { margin: 3px 0 0; color: #172b4d; font-size: 20px; line-height: 1.15; }
+.intro { margin: 11px 0 10px; font-size: 11px; }
+
+button {
+  min-height: 38px;
+  margin-top: 0;
+  border-radius: 9px;
+  transition: background-color .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+button:focus-visible, select:focus-visible, input:focus-visible {
+  outline: 3px solid #84b3ff;
+  outline-offset: 2px;
+}
+button:hover:not(:disabled) { box-shadow: 0 3px 9px #243b5b20; }
+button:active:not(:disabled) { transform: translateY(1px); }
+.primary { background: #1457c5; box-shadow: 0 3px 8px #1457c529; }
+.primary:hover:not(:disabled) { background: #0e49a9; }
+.download { background: #1457c5; color: #fff; }
+.download:hover:not(:disabled) { background: #0e49a9; }
+.download:disabled { background: #e2e8f1; color: #8491a3; box-shadow: none; }
+
+.class-opener, .download-job, .results, .download-panel {
+  border: 1px solid #dce4ef;
+  border-radius: 11px;
+  box-shadow: 0 2px 7px #1c31500a;
+}
+.class-opener { margin-top: 10px; padding: 12px; }
+.class-opener h2, .download-job h2 { color: #1b3152; font-size: 13px; }
+.opener-help { font-size: 10px; }
+.open-class-list { max-height: 125px; margin-top: 8px !important; }
+.open-class-row { padding: 5px 4px; border-radius: 5px; }
+.open-class-row:hover { background: #f3f6fb; }
+.opener-status:empty { display: none; }
+
+.download-job { margin-top: 10px; padding: 12px; background: #fff; }
+.job-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.job-heading h2 { margin: 0; }
+.job-summary { margin-top: 4px; color: #3f5068; }
+.job-badge {
+  flex: none;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: #edf1f6;
+  color: #5d6a7d;
+  font-size: 9px;
+  font-weight: 700;
+}
+.job-badge-downloading { background: #e8f1ff; color: #1b58ac; }
+.job-badge-complete { background: #e7f6ee; color: #187342; }
+.job-badge-paused, .job-badge-interrupted, .job-badge-needs-links { background: #fff2db; color: #8c5b09; }
+.job-progress { display: block; width: 100%; height: 6px; margin-top: 9px; accent-color: #1c64cc; }
+.job-help { margin-top: 7px; font-size: 10px; }
+.job-items { max-height: 125px; margin-top: 8px !important; border-top: 1px solid #edf0f5; padding-top: 5px !important; }
+.job-item-row { align-items: baseline; }
+.job-item-status { color: #617087; }
+.job-actions { display: grid; gap: 6px; margin-top: 9px; }
+.job-action { min-height: 34px; margin: 0; padding: 7px 9px; border: 1px solid #d9e5f6; background: #f0f5fc; color: #174680; }
+.job-action:hover:not(:disabled) { background: #e2edfb; }
+.job-action-danger { border-color: #f1d6d6; background: #fff7f7; color: #a33b3b; }
+.job-action-danger:hover:not(:disabled) { background: #ffeded; }
+.job-delete-help { margin: -2px 0 0; color: #758196; font-size: 9px; line-height: 1.35; }
+
+.results { max-height: 295px; margin-top: 10px; padding: 11px; }
+.results .summary { color: #1b3152; }
+.select-all-row { padding: 6px 7px; border-radius: 6px; background: #f4f7fb; }
+.tree > li { margin: 6px 0; }
+.tree-file-row { padding: 2px 0; }
+.download-status { padding: 2px 5px; border-radius: 999px; background: #f0f3f7; }
+.download-status.ready { background: #eaf6ef; }
+.download-status.missing { background: #fff4df; }
+
+.download-panel { margin-top: 10px; padding: 12px; background: #fff; }
+.selection-summary { margin: 0; padding: 7px 9px; border-radius: 7px; background: #f1f5fb; color: #344761; font-size: 11px; }
+.format-label { margin-top: 11px; font-size: 11px; }
+#download-format { min-height: 37px; border-color: #d4deeb; border-radius: 8px; font-size: 11px; }
+.format-help { margin-top: 6px; font-size: 9px; line-height: 1.4; }
+.download-panel .download { margin-top: 10px; }
+.status { margin-top: 7px; font-size: 10px; }
+.footnote { margin-top: 9px; text-align: center; font-size: 9px; }

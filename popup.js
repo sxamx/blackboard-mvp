@@ -13,8 +13,11 @@ const downloadJobPanel = document.getElementById("download-job");
 const jobSummary = document.getElementById("job-summary");
 const jobHelp = document.getElementById("job-help");
 const jobItemsBox = document.getElementById("job-items");
+const jobStatusBadge = document.getElementById("job-status-badge");
+const jobProgress = document.getElementById("job-progress");
 const resumeJobButton = document.getElementById("resume-job");
 const refreshJobLinksButton = document.getElementById("refresh-job-links");
+const clearJobButton = document.getElementById("clear-job");
 document.getElementById("version").textContent = chrome.runtime.getManifest().version;
 let currentSelectionRecords = [];
 let currentTabId = null;
@@ -117,6 +120,32 @@ refreshJobLinksButton.addEventListener("click", async () => {
     jobHelp.textContent = error.message || "No pude actualizar los enlaces.";
   } finally {
     refreshJobLinksButton.disabled = false;
+  }
+});
+
+clearJobButton.addEventListener("click", async () => {
+  if (!latestDownloadJob) return;
+  const confirmed = window.confirm(
+    "¿Cancelar las descargas activas y eliminar esta cola? Los archivos ya completados se conservarán. Si Edge tiene una ventana Guardar abierta, ciérrala también."
+  );
+  if (!confirmed) return;
+
+  clearJobButton.disabled = true;
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "clear-folder-download-job" });
+    if (!result?.ok) throw new Error(result?.error || "No pude eliminar la cola.");
+    renderDownloadJob(null);
+    const cancelledText = result.cancelled
+      ? ` Cancelé ${result.cancelled} descarga(s) activa(s).`
+      : "";
+    const waitingText = result.waitingForSave
+      ? ` Cierra cualquier ventana Guardar pendiente de Edge.`
+      : "";
+    statusBox.textContent = `Eliminé la cola; los archivos completados se conservaron.${cancelledText}${waitingText}`;
+  } catch (error) {
+    jobHelp.textContent = error.message || "No pude eliminar la cola.";
+  } finally {
+    clearJobButton.disabled = false;
   }
 });
 
@@ -451,6 +480,8 @@ function renderDownloadJob(job) {
   matchingRefreshLinks = job ? findRefreshableLinks(job) : [];
   if (!job) {
     downloadJobPanel.hidden = true;
+    jobStatusBadge.textContent = "";
+    jobProgress.value = 0;
     updateDownloadButton();
     return;
   }
@@ -463,6 +494,19 @@ function renderDownloadJob(job) {
   const resumable = job.items.filter((item) => item.canResume && ["paused", "interrupted"].includes(item.status));
   const needsLinks = job.items.filter((item) => item.status === "needs-link");
   jobSummary.textContent = `${job.courseName}: ${completed} de ${total} archivo(s) completados.`;
+  jobProgress.max = Math.max(1, total);
+  jobProgress.value = completed;
+  const statusLabels = {
+    downloading: "Activa",
+    queued: "Pendiente",
+    paused: "Pausada",
+    interrupted: "Interrumpida",
+    "needs-links": "Requiere atención",
+    complete: "Completada"
+  };
+  const badgeStatus = statusLabels[job.status] ? job.status : "needs-links";
+  jobStatusBadge.textContent = statusLabels[badgeStatus];
+  jobStatusBadge.className = `job-badge job-badge-${badgeStatus}`;
 
   if (job.status === "complete") {
     jobHelp.textContent = "La cola terminó. Puedes iniciar otra descarga cuando quieras.";

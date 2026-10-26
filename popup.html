@@ -8,9 +8,14 @@
   </head>
   <body>
     <main>
-      <div class="eyebrow">DUOC UC · BLACKBOARD</div>
-      <h1>Detector de contenido</h1>
-      <p class="intro">Muestra el contenido ya cargado. Descarga únicamente los archivos que marques y para los que Blackboard exponga un enlace directo.</p>
+      <header class="app-header">
+        <div class="brand-mark" aria-hidden="true">DUOC</div>
+        <div class="header-copy">
+          <div class="eyebrow">BLACKBOARD · MATERIA DEL CURSO</div>
+          <h1>Material de clases</h1>
+        </div>
+      </header>
+      <p class="intro">Abre clases, revisa sus archivos y descarga el material ordenado por clase.</p>
 
       <button id="scan" class="primary" type="button">Detectar clases y archivos</button>
 
@@ -27,27 +32,39 @@
       </section>
 
       <section id="download-job" class="download-job" aria-live="polite" hidden>
-        <h2>Cola de descargas</h2>
-        <p id="job-summary" class="job-summary"></p>
+        <div class="job-heading">
+          <div>
+            <h2>Cola de descargas</h2>
+            <p id="job-summary" class="job-summary"></p>
+          </div>
+          <span id="job-status-badge" class="job-badge"></span>
+        </div>
+        <progress id="job-progress" class="job-progress" max="1" value="0" aria-label="Progreso de la cola"></progress>
         <p id="job-help" class="muted job-help"></p>
         <ul id="job-items" class="job-items"></ul>
-        <button id="resume-job" class="job-action" type="button" hidden>Reanudar archivos interrumpidos</button>
-        <button id="refresh-job-links" class="job-action" type="button" hidden>Actualizar enlaces pendientes</button>
+        <div class="job-actions">
+          <button id="resume-job" class="job-action" type="button" hidden>Reanudar archivos interrumpidos</button>
+          <button id="refresh-job-links" class="job-action" type="button" hidden>Actualizar enlaces pendientes</button>
+          <button id="clear-job" class="job-action job-action-danger" type="button">Cancelar y eliminar cola</button>
+          <p class="job-delete-help">Los archivos completados se conservan.</p>
+        </div>
       </section>
 
       <section id="results" class="results" aria-live="polite">
         <p class="muted">Aún no he leído la pestaña.</p>
       </section>
 
-      <p id="selection-summary" class="selection-summary" role="status">0 archivos seleccionados.</p>
-      <label class="format-label" for="download-format">Formato de salida</label>
-      <select id="download-format">
-        <option value="folder">Carpeta del curso con subcarpetas por clase</option>
-        <option value="zip">Un ZIP con subcarpetas por clase</option>
-      </select>
-      <p class="format-help">Carpeta: envía todos los archivos a Edge y los ordena en Descargas/&lt;curso&gt;/&lt;clase&gt;; cada ventana nativa de Guardar aún puede requerir tu confirmación. ZIP: hasta 100 MB de contenido; el ZIP puede ser algo mayor y no guarda progreso intermedio.</p>
-      <button id="download-selected" class="download" type="button" disabled>Descargar seleccionados</button>
-      <p id="status" class="status" role="status">Marcar casillas no descarga nada. La descarga inicia solo al pulsar el botón.</p>
+      <section class="download-panel" aria-label="Opciones de descarga">
+        <p id="selection-summary" class="selection-summary" role="status">0 archivos seleccionados.</p>
+        <label class="format-label" for="download-format">Formato de salida</label>
+        <select id="download-format">
+          <option value="folder">Carpeta del curso con subcarpetas por clase</option>
+          <option value="zip">Un ZIP con subcarpetas por clase</option>
+        </select>
+        <p class="format-help">Carpeta: ordena todos los archivos por clase; Edge puede pedir Guardar por cada uno. ZIP: hasta 100 MB de contenido y sin progreso intermedio.</p>
+        <button id="download-selected" class="download" type="button" disabled>Descargar seleccionados</button>
+        <p id="status" class="status" role="status">Marcar casillas no descarga nada. La descarga inicia solo al pulsar el botón.</p>
+      </section>
       <p class="footnote">v<span id="version"></span> · La selección es temporal. El progreso de carpetas se guarda en este equipo.</p>
     </main>
     <script src="popup.js"></script>

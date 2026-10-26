@@ -32,7 +32,7 @@ chrome.downloads.onChanged.addListener((delta) => {
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (!["get-folder-download-job", "start-folder-download-job", "resume-folder-download-job", "refresh-folder-download-links"].includes(message?.type)) return false;
+  if (!["get-folder-download-job", "start-folder-download-job", "resume-folder-download-job", "refresh-folder-download-links", "clear-folder-download-job"].includes(message?.type)) return false;
   const operation = handleMessage(message);
   operation
     .then(sendResponse)
@@ -48,6 +48,7 @@ async function handleMessage(message) {
   if (message?.type === "start-folder-download-job") return startFolderJob(message);
   if (message?.type === "resume-folder-download-job") return resumeFolderJob();
   if (message?.type === "refresh-folder-download-links") return refreshFolderJobLinks(message.links);
+  if (message?.type === "clear-folder-download-job") return clearFolderJob();
   return null;
 }
 
@@ -148,7 +149,7 @@ async function startDownloadForItem(jobId, task) {
     [download] = await chrome.downloads.search({ id: downloadId });
   } catch {}
 
-  await mutateJob(jobId, async (job) => {
+  const updatedJob = await mutateJob(jobId, async (job) => {
     await removeSessionUrlUnlocked(task.itemId);
     const item = job.items.find((candidate) => candidate.id === task.itemId);
     if (!item) return false;
@@ -159,6 +160,7 @@ async function startDownloadForItem(jobId, task) {
     else item.status = "downloading";
     return true;
   });
+  if (!updatedJob) await cancelDownloadIfActive(downloadId);
   startingItems.delete(task.itemId);
   startingItemUrls.delete(task.itemId);
 }
@@ -207,6 +209,62 @@ async function removeSessionUrlUnlocked(itemId) {
     delete urls[itemId];
     await chrome.storage.session.set({ [SESSION_URLS_KEY]: urls });
   } catch {}
+}
+
+async function clearFolderJob() {
+  return withJobMutationLock(null, async () => {
+    const job = await readJob();
+    if (!job) {
+      await chrome.storage.session.remove(SESSION_URLS_KEY);
+      return { ok: true, cancelled: 0, waitingForSave: 0, job: null };
+    }
+
+    const stored = await chrome.storage.session.get(SESSION_URLS_KEY);
+    const urls = stored[SESSION_URLS_KEY] || {};
+    const activeDownloadIds = new Set();
+    let waitingForSave = 0;
+
+    for (const item of job.items) {
+      if (["starting", "downloading", "paused"].includes(item.status)) {
+        for (const id of [...(item.downloadIds || []), item.downloadId]) {
+          if (Number.isInteger(id)) activeDownloadIds.add(id);
+        }
+        if (item.status === "starting" && !Number.isInteger(item.downloadId)) {
+          const recent = await findRecentDownload(job, item);
+          if (recent?.state === "in_progress") activeDownloadIds.add(recent.id);
+          else waitingForSave += 1;
+        }
+      }
+
+      const url = urls[item.id] || startingItemUrls.get(item.id);
+      if (url) removePendingDownloadPath(normalizeDownloadKey(url), item.filename);
+      startingItems.delete(item.id);
+      startingItemUrls.delete(item.id);
+    }
+
+    let cancelled = 0;
+    for (const id of activeDownloadIds) {
+      if (await cancelDownloadIfActive(id)) cancelled += 1;
+    }
+
+    await chrome.storage.session.remove(SESSION_URLS_KEY);
+    await chrome.storage.local.remove(JOB_STORAGE_KEY);
+    try {
+      await chrome.runtime.sendMessage({ type: "folder-download-job-updated", job: null });
+    } catch {}
+    return { ok: true, cancelled, waitingForSave, job: null };
+  });
+}
+
+async function cancelDownloadIfActive(downloadId) {
+  try {
+    const [download] = await chrome.downloads.search({ id: downloadId });
+    if (download?.state !== "in_progress") return false;
+    await chrome.downloads.cancel(downloadId);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function resumeFolderJob() {
@@ -383,8 +441,10 @@ async function getJobSnapshot() {
 function findStartingItem(job, download) {
   if (!belongsToThisExtension(download)) return null;
   const urlKey = normalizeDownloadKey(download.url);
+  const downloadStartedAt = download.startTime ? new Date(download.startTime).getTime() : 0;
   const candidates = job.items.filter((item) => item.status === "starting" && !item.downloadId && startingItems.has(item.id)
-    && normalizeDownloadKey(startingItemUrls.get(item.id) || "") === urlKey);
+    && normalizeDownloadKey(startingItemUrls.get(item.id) || "") === urlKey
+    && (!downloadStartedAt || downloadStartedAt >= (item.startRequestedAt || 0) - 1_000));
   if (!candidates.length) return null;
   if (download.filename) {
     const match = candidates.find((item) => pathEndsWith(download.filename, item.filename));

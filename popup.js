@@ -18,6 +18,22 @@ const jobProgress = document.getElementById("job-progress");
 const resumeJobButton = document.getElementById("resume-job");
 const refreshJobLinksButton = document.getElementById("refresh-job-links");
 const clearJobButton = document.getElementById("clear-job");
+const classesView = document.getElementById("classes-view");
+const queueView = document.getElementById("queue-view");
+const classesTabButton = document.getElementById("tab-classes");
+const queueTabButton = document.getElementById("tab-queue");
+const classesTabCount = document.getElementById("classes-tab-count");
+const queueTabCount = document.getElementById("queue-tab-count");
+const queueEmpty = document.getElementById("queue-empty");
+const queueStatusBox = document.getElementById("queue-status");
+const queueGoClassesButton = document.getElementById("queue-go-classes");
+const scanWelcome = document.getElementById("scan-welcome");
+const classWorkspace = document.getElementById("class-workspace");
+const downloadPanel = document.getElementById("download-panel");
+const courseTitle = document.getElementById("course-title");
+const openClassCount = document.getElementById("open-class-count");
+const jobProgressLabel = document.getElementById("job-progress-label");
+const formatHelp = document.getElementById("format-help");
 document.getElementById("version").textContent = chrome.runtime.getManifest().version;
 let currentSelectionRecords = [];
 let currentTabId = null;
@@ -35,12 +51,59 @@ function selectedFileRecords() {
 
 function updateDownloadButton() {
   const selected = selectedFileRecords();
-  downloadButton.textContent = downloadFormat.value === "zip" ? "Crear y descargar ZIP" : "Descargar seleccionados";
-  const folderJobActive = downloadFormat.value === "folder" && latestDownloadJob && latestDownloadJob.status !== "complete";
+  const isZip = downloadFormat.value === "zip";
+  const isLoose = downloadFormat.value === "loose";
+  const countLabel = selected.length === 1 ? "1 archivo" : `${selected.length} archivos`;
+  downloadButton.textContent = isZip ? `Crear ZIP · ${countLabel}` : `Descargar ${countLabel}`;
+  formatHelp.textContent = isZip
+    ? "Un ZIP con una subcarpeta por clase. Límite actual: 100 MB de contenido."
+    : isLoose
+      ? "Archivos juntos en una carpeta del curso, sin separarlos por clase."
+      : "Una subcarpeta por clase. Edge puede pedir Guardar por cada archivo.";
+  for (const button of document.querySelectorAll(".format-option")) {
+    const selectedFormat = button.dataset.format === downloadFormat.value;
+    button.classList.toggle("is-selected", selectedFormat);
+    button.setAttribute("aria-pressed", String(selectedFormat));
+  }
+  const folderJobActive = !isZip && latestDownloadJob && latestDownloadJob.status !== "complete";
   downloadButton.disabled = downloadInProgress || Boolean(folderJobActive) || selected.length === 0 || selected.some((record) => !record.url);
 }
 
+for (const button of document.querySelectorAll(".format-option")) {
+  button.addEventListener("click", () => {
+    downloadFormat.value = button.dataset.format;
+    downloadFormat.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
 downloadFormat.addEventListener("change", updateDownloadButton);
+
+function showView(viewName) {
+  const queueActive = viewName === "queue";
+  classesView.hidden = queueActive;
+  queueView.hidden = !queueActive;
+  classesTabButton.classList.toggle("is-active", !queueActive);
+  queueTabButton.classList.toggle("is-active", queueActive);
+  classesTabButton.setAttribute("aria-selected", String(!queueActive));
+  queueTabButton.setAttribute("aria-selected", String(queueActive));
+  classesTabButton.tabIndex = queueActive ? -1 : 0;
+  queueTabButton.tabIndex = queueActive ? 0 : -1;
+  if (queueActive) void refreshDownloadJob();
+}
+
+classesTabButton.addEventListener("click", () => showView("classes"));
+queueTabButton.addEventListener("click", () => showView("queue"));
+for (const [index, button] of [classesTabButton, queueTabButton].entries()) {
+  button.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const nextIndex = (index + (event.key === "ArrowRight" ? 1 : -1) + 2) % 2;
+    const nextButton = [classesTabButton, queueTabButton][nextIndex];
+    nextButton.focus();
+    nextButton.click();
+  });
+}
+queueGoClassesButton.addEventListener("click", () => showView("classes"));
 
 openAllClassesCheckbox.addEventListener("change", () => {
   for (const checkbox of openClassList.querySelectorAll('input[type="checkbox"]')) {
@@ -141,7 +204,7 @@ clearJobButton.addEventListener("click", async () => {
     const waitingText = result.waitingForSave
       ? ` Cierra cualquier ventana Guardar pendiente de Edge.`
       : "";
-    statusBox.textContent = `Eliminé la cola; los archivos completados se conservaron.${cancelledText}${waitingText}`;
+    queueStatusBox.textContent = `Eliminé la cola; los archivos completados se conservaron.${cancelledText}${waitingText}`;
   } catch (error) {
     jobHelp.textContent = error.message || "No pude eliminar la cola.";
   } finally {
@@ -380,11 +443,20 @@ async function getActiveBlackboardTab() {
 scanButton.addEventListener("click", async () => {
   statusBox.textContent = "Leyendo nombres ya cargados en la pestaña…";
   classOpener.hidden = true;
+  downloadPanel.hidden = true;
   resultsBox.replaceChildren();
+  if (!classWorkspace.hidden) {
+    resultsBox.hidden = false;
+    const loading = document.createElement("p");
+    loading.className = "muted";
+    loading.textContent = "Actualizando la lista de clases y archivos…";
+    resultsBox.append(loading);
+  }
   currentSelectionRecords = [];
   selectionSummary.textContent = "0 archivos seleccionados.";
   updateDownloadButton();
   scanButton.disabled = true;
+  scanButton.textContent = classWorkspace.hidden ? "Detectando…" : "Actualizando…";
   try {
     const tab = await getActiveBlackboardTab();
     currentTabId = tab.id;
@@ -397,6 +469,9 @@ scanButton.addEventListener("click", async () => {
     renderResult(result?.result || { pageTitle: "Título no visible", courseName: "Curso", classes: [], filesWithoutClass: [], fileCount: 0 });
     void refreshDownloadJob();
   } catch (error) {
+    scanWelcome.hidden = true;
+    classWorkspace.hidden = false;
+    resultsBox.hidden = false;
     resultsBox.replaceChildren();
     const message = document.createElement("p");
     message.className = "muted";
@@ -410,6 +485,7 @@ scanButton.addEventListener("click", async () => {
     void refreshDownloadJob();
   } finally {
     scanButton.disabled = false;
+    scanButton.textContent = classWorkspace.hidden ? "Detectar clases y archivos" : "Detectar de nuevo";
   }
 });
 
@@ -423,7 +499,7 @@ downloadButton.addEventListener("click", async () => {
     if (downloadFormat.value === "zip") {
       await downloadSelectedAsZip(selected);
     } else {
-      await downloadSelectedAsFolders(selected);
+      await downloadSelectedAsFolders(selected, { flat: downloadFormat.value === "loose" });
     }
   } catch (error) {
     statusBox.textContent = error.message || "No pude preparar la descarga.";
@@ -445,7 +521,7 @@ function getDownloadUrl(record) {
   return url;
 }
 
-async function downloadSelectedAsFolders(selected) {
+async function downloadSelectedAsFolders(selected, { flat = false } = {}) {
   const courseFolder = sanitizePathSegment(currentCourseName);
   const selectedClasses = [...new Set(selected
     .filter((record) => record.folder !== "Archivos sin clase identificada")
@@ -453,7 +529,9 @@ async function downloadSelectedAsFolders(selected) {
   const classLabel = summarizeClassNames(selectedClasses);
   const files = selected.map((record) => {
     const url = getDownloadUrl(record);
-    const filename = `${courseFolder}/${sanitizePathSegment(record.folder)}/${sanitizePathSegment(record.name)}`;
+    const filename = flat
+      ? `${courseFolder}/${sanitizePathSegment(record.name)}`
+      : `${courseFolder}/${sanitizePathSegment(record.folder)}/${sanitizePathSegment(record.name)}`;
     return { url: url.href, filename, name: record.name, folder: record.folder };
   });
   statusBox.textContent = "Guardando la cola de descargas…";
@@ -464,8 +542,12 @@ async function downloadSelectedAsFolders(selected) {
   });
   if (!result?.ok) throw new Error(result?.error || "No pude iniciar la cola de descargas.");
   if (result.job) renderDownloadJob(result.job);
+  showView("queue");
   const needsLinks = result.job?.items?.filter((item) => item.status === "needs-link").length || 0;
-  statusBox.textContent = `Envié a Edge las solicitudes de ${selected.length} archivo(s) para ${selectedClasses.length} clase(s) (${classLabel}). La extensión ya no espera a que termine cada archivo para solicitar el siguiente; Edge aún puede mostrar sus ventanas de Guardar por separado.${needsLinks ? ` ${needsLinks} archivo(s) necesitan un enlace nuevo.` : ""}`;
+  const destinationLabel = flat
+    ? `en Descargas/${courseFolder}, todos juntos`
+    : `para ${selectedClasses.length} clase(s) (${classLabel})`;
+  statusBox.textContent = `Envié a Edge las solicitudes de ${selected.length} archivo(s) ${destinationLabel}. La extensión ya no espera a que termine cada archivo para solicitar el siguiente; Edge aún puede mostrar sus ventanas de Guardar por separado.${needsLinks ? ` ${needsLinks} archivo(s) necesitan un enlace nuevo.` : ""}`;
 }
 
 async function refreshDownloadJob() {
@@ -479,13 +561,19 @@ function renderDownloadJob(job) {
   latestDownloadJob = job;
   matchingRefreshLinks = job ? findRefreshableLinks(job) : [];
   if (!job) {
+    queueEmpty.hidden = false;
     downloadJobPanel.hidden = true;
+    queueTabCount.textContent = "";
+    queueTabCount.hidden = true;
     jobStatusBadge.textContent = "";
     jobProgress.value = 0;
+    jobProgressLabel.textContent = "0%";
     updateDownloadButton();
     return;
   }
 
+  queueStatusBox.textContent = "";
+  queueEmpty.hidden = true;
   downloadJobPanel.hidden = false;
   const total = job.items.length;
   const completed = job.items.filter((item) => item.status === "complete").length;
@@ -493,9 +581,19 @@ function renderDownloadJob(job) {
   const active = activeItems.find((item) => item.status === "downloading") || activeItems[0];
   const resumable = job.items.filter((item) => item.canResume && ["paused", "interrupted"].includes(item.status));
   const needsLinks = job.items.filter((item) => item.status === "needs-link");
-  jobSummary.textContent = `${job.courseName}: ${completed} de ${total} archivo(s) completados.`;
+  const unfinished = Math.max(0, total - completed);
+  queueTabCount.textContent = unfinished ? String(unfinished) : "";
+  queueTabCount.hidden = unfinished === 0;
+  queueTabCount.setAttribute("aria-label", unfinished ? `${unfinished} archivo(s) pendientes o en curso` : "Cola completada");
+  if (!currentTabId) {
+    currentCourseName = job.courseName || currentCourseName;
+    courseTitle.textContent = currentCourseName;
+  }
+
+  jobSummary.textContent = `${job.courseName}: ${completed} de ${total} archivos completados.`;
   jobProgress.max = Math.max(1, total);
   jobProgress.value = completed;
+  jobProgressLabel.textContent = `${Math.floor(completed / Math.max(1, total) * 100)}%`;
   const statusLabels = {
     downloading: "Activa",
     queued: "Pendiente",
@@ -537,28 +635,53 @@ function renderDownloadJob(job) {
 
   const previousScrollTop = jobItemsBox.scrollTop;
   jobItemsBox.replaceChildren();
+  const groups = new Map();
   for (const item of job.items) {
-    const listItem = document.createElement("li");
-    const row = document.createElement("div");
-    row.className = "job-item-row";
-    const name = document.createElement("span");
-    name.className = "job-item-name";
-    name.textContent = `${item.folder} · ${item.name}`;
-    const state = document.createElement("span");
-    state.className = "job-item-status";
-    state.textContent = jobItemStatus(item);
-    if (item.pathChanged) state.title = "Edge guardó este archivo en otra carpeta.";
-    row.append(name, state);
-    listItem.append(row);
+    const folder = item.folder || "Archivos sin clase identificada";
+    if (!groups.has(folder)) groups.set(folder, []);
+    groups.get(folder).push(item);
+  }
 
-    if (["downloading", "paused"].includes(item.status)) {
-      const progress = document.createElement("progress");
-      progress.className = "job-item-progress";
-      progress.max = 1;
-      if (Number(item.totalBytes) > 0) progress.value = Math.min(1, (Number(item.bytesReceived) || 0) / Number(item.totalBytes));
-      listItem.append(progress);
+  for (const [folder, items] of groups) {
+    const groupItem = document.createElement("li");
+    groupItem.className = "job-class-group";
+    const heading = document.createElement("div");
+    heading.className = "job-class-heading";
+    const folderName = document.createElement("span");
+    folderName.textContent = folder;
+    const groupCompleted = items.filter((item) => item.status === "complete").length;
+    const groupSummary = document.createElement("span");
+    groupSummary.className = "job-class-summary";
+    groupSummary.textContent = `${groupCompleted} / ${items.length}`;
+    heading.append(folderName, groupSummary);
+
+    const fileList = document.createElement("ul");
+    fileList.className = "job-class-files";
+    for (const item of items) {
+      const listItem = document.createElement("li");
+      const row = document.createElement("div");
+      row.className = "job-item-row";
+      const name = document.createElement("span");
+      name.className = "job-item-name";
+      name.textContent = item.name;
+      const state = document.createElement("span");
+      state.className = `job-item-status job-item-status-${item.status || "pending"}`;
+      state.textContent = jobItemStatus(item);
+      if (item.pathChanged) state.title = "Edge guardó este archivo en otra carpeta.";
+      row.append(name, state);
+      listItem.append(row);
+
+      if (["downloading", "paused"].includes(item.status)) {
+        const progress = document.createElement("progress");
+        progress.className = "job-item-progress";
+        progress.max = 1;
+        if (Number(item.totalBytes) > 0) progress.value = Math.min(1, (Number(item.bytesReceived) || 0) / Number(item.totalBytes));
+        listItem.append(progress);
+      }
+      fileList.append(listItem);
     }
-    jobItemsBox.append(listItem);
+    groupItem.append(heading, fileList);
+    jobItemsBox.append(groupItem);
   }
   jobItemsBox.scrollTop = previousScrollTop;
   updateDownloadButton();
@@ -816,10 +939,17 @@ function updateOpenClassesButton() {
   openAllClassesCheckbox.checked = checkboxes.length > 0 && selectedCount === checkboxes.length;
   openAllClassesCheckbox.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
   openClassesButton.disabled = openingClasses || currentTabId === null || selectedCount === 0;
+  openClassesButton.textContent = selectedCount === 1
+    ? "Abrir 1 clase"
+    : selectedCount > 1 ? `Abrir ${selectedCount} clases` : "Abrir clases seleccionadas";
 }
 
 function renderClassOpener(classes) {
   currentClassNames = classes.map((classEntry) => classEntry.name);
+  classesTabCount.textContent = currentClassNames.length ? String(currentClassNames.length) : "";
+  classesTabCount.hidden = currentClassNames.length === 0;
+  openClassCount.textContent = currentClassNames.length ? `${currentClassNames.length} clases` : "";
+  openClassCount.hidden = currentClassNames.length === 0;
   openClassList.replaceChildren();
   openClassesStatus.textContent = "";
   classOpener.hidden = currentClassNames.length === 0;
@@ -980,11 +1110,20 @@ async function expandSelectedBlackboardFolders(requestedNames) {
 }
 
 function renderResult(result) {
+  scanWelcome.hidden = true;
+  classWorkspace.hidden = false;
+  resultsBox.hidden = false;
+  downloadPanel.hidden = true;
   resultsBox.replaceChildren();
   currentCourseName = result.courseName || result.pageTitle || "Curso";
+  courseTitle.textContent = currentCourseName;
+  scanButton.textContent = "Detectar de nuevo";
   renderClassOpener(result.classes || []);
+  const heading = document.createElement("h2");
+  heading.textContent = "Clases y archivos";
+  resultsBox.append(heading);
   const pageTitle = document.createElement("p");
-  pageTitle.className = "summary";
+  pageTitle.className = "muted";
   pageTitle.textContent = `Vista actual: ${result.pageTitle}`;
   resultsBox.append(pageTitle);
 
@@ -1007,6 +1146,7 @@ function renderResult(result) {
   count.textContent = `Encontré ${result.classes.length} clase(s) y ${result.fileCount} nombre(s) de archivo: ${associatedCount} asociado(s) a ${classesWithFiles} clase(s), ${result.filesWithoutClass.length} sin asociación segura.`;
   resultsBox.append(count);
 
+  downloadPanel.hidden = false;
   const fileSelectionRecords = [];
   currentSelectionRecords = fileSelectionRecords;
   const groupStates = [];

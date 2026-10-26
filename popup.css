@@ -50,6 +50,24 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .download { background: #e6edf8; color: #174680; }
 .download:disabled { background: #e9edf3; color: #78869a; }
 
+.class-opener {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #dce3ed;
+  border-radius: 7px;
+  background: #fff;
+}
+.class-opener[hidden] { display: none; }
+.class-opener h2 { margin: 0; font-size: 13px; }
+.opener-help { margin: 4px 0 0; font-size: 10px; line-height: 1.4; }
+.opener-select-all { margin-top: 7px; }
+.open-class-list { max-height: 130px; overflow: auto; margin: 6px 0 0 !important; padding: 0 !important; list-style: none; }
+.open-class-list li { margin: 0; }
+.open-class-row { display: flex; align-items: flex-start; gap: 7px; padding: 4px 0; font-size: 11px; line-height: 1.35; cursor: pointer; }
+.open-class-row input { flex: none; margin: 1px 0 0; }
+.open-class-row span { min-width: 0; overflow-wrap: anywhere; }
+.opener-status { margin: 5px 0 0; font-size: 10px; line-height: 1.4; }
+
 .results {
   max-height: 310px;
   overflow: auto;

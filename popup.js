@@ -1,4 +1,9 @@
 const scanButton = document.getElementById("scan");
+const classOpener = document.getElementById("class-opener");
+const openAllClassesCheckbox = document.getElementById("open-all-classes");
+const openClassList = document.getElementById("open-class-list");
+const openClassesButton = document.getElementById("open-classes-button");
+const openClassesStatus = document.getElementById("open-classes-status");
 const resultsBox = document.getElementById("results");
 const statusBox = document.getElementById("status");
 const selectionSummary = document.getElementById("selection-summary");
@@ -18,6 +23,8 @@ let currentCourseName = "Curso";
 let downloadInProgress = false;
 let latestDownloadJob = null;
 let matchingRefreshLinks = [];
+let currentClassNames = [];
+let openingClasses = false;
 
 function selectedFileRecords() {
   return currentSelectionRecords.filter((record) => record.checkbox.checked);
@@ -31,6 +38,47 @@ function updateDownloadButton() {
 }
 
 downloadFormat.addEventListener("change", updateDownloadButton);
+
+openAllClassesCheckbox.addEventListener("change", () => {
+  for (const checkbox of openClassList.querySelectorAll('input[type="checkbox"]')) {
+    checkbox.checked = openAllClassesCheckbox.checked;
+  }
+  updateOpenClassesButton();
+});
+
+openClassesButton.addEventListener("click", async () => {
+  const selectedNames = currentClassNames.filter((_name, index) => {
+    const checkbox = openClassList.querySelector(`[data-class-index="${index}"]`);
+    return checkbox?.checked;
+  });
+  if (!selectedNames.length || currentTabId === null) return;
+
+  openingClasses = true;
+  updateOpenClassesButton();
+  openClassesStatus.textContent = `Abriendo ${selectedNames.length} clase(s) en Blackboard…`;
+  try {
+    const [outcome] = await chrome.scripting.executeScript({
+      target: { tabId: currentTabId },
+      world: "MAIN",
+      func: expandSelectedBlackboardFolders,
+      args: [selectedNames]
+    });
+    const result = outcome?.result;
+    if (!result?.ok) throw new Error(result?.error || "No pude abrir las clases seleccionadas.");
+    const parts = [];
+    if (result.opened) parts.push(`${result.opened} abierta(s)`);
+    if (result.alreadyOpen) parts.push(`${result.alreadyOpen} ya estaba(n) abierta(s)`);
+    if (result.missing) parts.push(`${result.missing} no encontrada(s)`);
+    openClassesStatus.textContent = `${parts.join(", ")}. Actualizando archivos visibles…`;
+    await new Promise((resolve) => window.setTimeout(resolve, 450));
+    scanButton.click();
+  } catch (error) {
+    openClassesStatus.textContent = error.message || "No pude abrir las clases seleccionadas.";
+  } finally {
+    openingClasses = false;
+    updateOpenClassesButton();
+  }
+});
 
 resumeJobButton.addEventListener("click", async () => {
   resumeJobButton.disabled = true;
@@ -59,7 +107,7 @@ refreshJobLinksButton.addEventListener("click", async () => {
     if (!result?.ok) jobHelp.textContent = result?.error || "No pude actualizar los enlaces.";
     if (result?.job) renderDownloadJob(result.job);
     else await refreshDownloadJob();
-    if (result?.ok) statusBox.textContent = `Actualicé ${result.updated} enlace(s). La cola continúa desde el primer archivo pendiente.`;
+    if (result?.ok) statusBox.textContent = `Actualicé ${result.updated} enlace(s) y envié a Edge las solicitudes pendientes.`;
   } catch (error) {
     jobHelp.textContent = error.message || "No pude actualizar los enlaces.";
   } finally {
@@ -297,6 +345,7 @@ async function getActiveBlackboardTab() {
 
 scanButton.addEventListener("click", async () => {
   statusBox.textContent = "Leyendo nombres ya cargados en la pestaña…";
+  classOpener.hidden = true;
   resultsBox.replaceChildren();
   currentSelectionRecords = [];
   selectionSummary.textContent = "0 archivos seleccionados.";
@@ -319,6 +368,7 @@ scanButton.addEventListener("click", async () => {
     message.className = "muted";
     message.textContent = error.message || "No pude leer esta página.";
     resultsBox.append(message);
+    classOpener.hidden = true;
     currentSelectionRecords = [];
     selectionSummary.textContent = "0 archivos seleccionados.";
     updateDownloadButton();
@@ -380,9 +430,8 @@ async function downloadSelectedAsFolders(selected) {
   });
   if (!result?.ok) throw new Error(result?.error || "No pude iniciar la cola de descargas.");
   if (result.job) renderDownloadJob(result.job);
-  statusBox.textContent = result.job?.items?.[0]?.status === "needs-link"
-    ? "Guardé la cola, pero Edge no pudo iniciar el primer archivo. Revisa el estado y actualiza su enlace."
-    : `Cola iniciada: ${selected.length} archivo(s) para ${selectedClasses.length} clase(s) (${classLabel}). Se procesan uno a uno; el progreso queda guardado en este equipo.`;
+  const needsLinks = result.job?.items?.filter((item) => item.status === "needs-link").length || 0;
+  statusBox.textContent = `Envié a Edge las solicitudes de ${selected.length} archivo(s) para ${selectedClasses.length} clase(s) (${classLabel}). La extensión ya no espera a que termine cada archivo para solicitar el siguiente; Edge aún puede mostrar sus ventanas de Guardar por separado.${needsLinks ? ` ${needsLinks} archivo(s) necesitan un enlace nuevo.` : ""}`;
 }
 
 async function refreshDownloadJob() {
@@ -404,7 +453,8 @@ function renderDownloadJob(job) {
   downloadJobPanel.hidden = false;
   const total = job.items.length;
   const completed = job.items.filter((item) => item.status === "complete").length;
-  const active = job.items.find((item) => item.status === "downloading" || item.status === "starting");
+  const activeItems = job.items.filter((item) => item.status === "downloading" || item.status === "starting");
+  const active = activeItems.find((item) => item.status === "downloading") || activeItems[0];
   const resumable = job.items.filter((item) => item.canResume && ["paused", "interrupted"].includes(item.status));
   const needsLinks = job.items.filter((item) => item.status === "needs-link");
   jobSummary.textContent = `${job.courseName}: ${completed} de ${total} archivo(s) completados.`;
@@ -415,20 +465,23 @@ function renderDownloadJob(job) {
     const received = Number(active.bytesReceived) || 0;
     const totalBytes = Number(active.totalBytes);
     const percent = totalBytes > 0 ? ` (${Math.min(100, Math.floor(received / totalBytes * 100))}%)` : "";
-    jobHelp.textContent = `Descargando ${active.name}${percent}. Puedes cerrar este panel; la cola sigue en Edge.`;
+    const startingCount = activeItems.filter((item) => item.status === "starting").length;
+    const waitingText = startingCount ? `${startingCount} esperando inicio o confirmación de Guardar. ` : "";
+    const progressText = active.status === "starting" ? "" : `Descargando ${active.name}${percent}. `;
+    jobHelp.textContent = `${activeItems.length} solicitud(es) en Edge. ${waitingText}${progressText}Puedes cerrar este panel; la cola sigue en Edge.`;
   } else if (resumable.length) {
     jobHelp.textContent = `${resumable.length} archivo(s) se pueden reanudar desde donde se interrumpieron.`;
   } else if (needsLinks.length && matchingRefreshLinks.length) {
     jobHelp.textContent = `Detecté enlaces para ${matchingRefreshLinks.length} de ${needsLinks.length} archivo(s) pendientes. Pulsa el botón para reanudar la cola.`;
   } else if (needsLinks.length) {
-    jobHelp.textContent = `Faltan enlaces para ${needsLinks.length} archivo(s). Abre Blackboard, detecta el contenido y expande las clases pendientes.`;
+    jobHelp.textContent = `Faltan enlaces para ${needsLinks.length} archivo(s). Abre Blackboard, detecta el contenido y usa Abrir clases para expandir las carpetas pendientes.`;
   } else {
     jobHelp.textContent = "La cola está esperando que Edge actualice el estado de la descarga.";
   }
 
   resumeJobButton.hidden = !resumable.length;
   resumeJobButton.textContent = resumable.length > 1
-    ? `Reanudar archivo interrumpido (${resumable.length})`
+    ? `Reanudar archivos interrumpidos (${resumable.length})`
     : "Reanudar archivo interrumpido";
   refreshJobLinksButton.hidden = !matchingRefreshLinks.length;
   refreshJobLinksButton.textContent = `Actualizar enlaces pendientes (${matchingRefreshLinks.length})`;
@@ -519,7 +572,7 @@ async function downloadSelectedAsZip(selected) {
     args: [{
       files,
       filename: `${sanitizePathSegment(currentCourseName)}.zip`,
-      maxBytes: 50 * 1024 * 1024
+      maxBytes: 100 * 1024 * 1024
     }]
   });
   if (!outcome?.result?.ok) throw new Error(outcome?.result?.error || "No pude preparar el ZIP.");
@@ -556,7 +609,7 @@ async function buildZipAndDownloadInBlackboardPage(options) {
             size += value.byteLength;
             if (totalBytes + size > maxBytes) {
               await reader.cancel();
-              throw new Error("La selección supera el límite de 50 MB para ZIP. Usa el formato de carpetas o selecciona menos archivos.");
+              throw new Error("La selección supera el límite de 100 MB para ZIP. Usa el formato de carpetas o selecciona menos archivos.");
             }
             chunks.push(value);
           }
@@ -567,7 +620,7 @@ async function buildZipAndDownloadInBlackboardPage(options) {
         const buffer = await response.arrayBuffer();
         size = buffer.byteLength;
         if (totalBytes + size > maxBytes) {
-          throw new Error("La selección supera el límite de 50 MB para ZIP. Usa el formato de carpetas o selecciona menos archivos.");
+          throw new Error("La selección supera el límite de 100 MB para ZIP. Usa el formato de carpetas o selecciona menos archivos.");
         }
         chunks.push(new Uint8Array(buffer));
       }
@@ -708,9 +761,93 @@ function sanitizePathSegment(value) {
   return safe;
 }
 
+function updateOpenClassesButton() {
+  const checkboxes = [...openClassList.querySelectorAll('input[type="checkbox"]')];
+  const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+  openAllClassesCheckbox.checked = checkboxes.length > 0 && selectedCount === checkboxes.length;
+  openAllClassesCheckbox.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
+  openClassesButton.disabled = openingClasses || currentTabId === null || selectedCount === 0;
+}
+
+function renderClassOpener(classes) {
+  currentClassNames = classes.map((classEntry) => classEntry.name);
+  openClassList.replaceChildren();
+  openClassesStatus.textContent = "";
+  classOpener.hidden = currentClassNames.length === 0;
+  openAllClassesCheckbox.checked = false;
+  openAllClassesCheckbox.indeterminate = false;
+  openAllClassesCheckbox.disabled = currentClassNames.length === 0;
+
+  currentClassNames.forEach((name, index) => {
+    const item = document.createElement("li");
+    const label = document.createElement("label");
+    label.className = "open-class-row";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.dataset.classIndex = String(index);
+    checkbox.addEventListener("change", updateOpenClassesButton);
+    const text = document.createElement("span");
+    text.textContent = name;
+    label.append(checkbox, text);
+    item.append(label);
+    openClassList.append(item);
+  });
+  updateOpenClassesButton();
+}
+
+async function expandSelectedBlackboardFolders(requestedNames) {
+  const analyticsId = "course.learningModule.tableOfContents.folder.list.folder.item.list-item";
+  const parentAnalyticsId = "course.learningModule.tableOfContents.folder.list.folder.item.list-item-parent";
+  const scope = document.querySelector(".js-content-navigation-drawer") || document;
+  const normalize = (value) => String(value || "").normalize("NFC").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+  let opened = 0;
+  let alreadyOpen = 0;
+  let missing = 0;
+
+  for (const requestedName of requestedNames) {
+    const target = normalize(requestedName);
+    const rows = [...scope.querySelectorAll(`li[data-analytics-id="${analyticsId}"]`)];
+    const row = rows.find((candidate) => {
+      const labels = [candidate.innerText || candidate.textContent || ""];
+      for (const element of candidate.querySelectorAll("[title], [aria-label]")) {
+        labels.push(element.getAttribute("title") || "", element.getAttribute("aria-label") || "");
+      }
+      return labels.some((label) => normalize(label).includes(target));
+    });
+    if (!row) {
+      missing += 1;
+      continue;
+    }
+
+    const collapse = row.nextElementSibling;
+    if (!collapse || !collapse.classList.contains("MuiCollapse-root")) {
+      missing += 1;
+      continue;
+    }
+    const isCollapsed = collapse.classList.contains("MuiCollapse-hidden") || collapse.getAttribute("aria-hidden") === "true";
+    if (!isCollapsed) {
+      alreadyOpen += 1;
+      continue;
+    }
+
+    const parent = row.querySelector(`div[role="button"][data-analytics-id="${parentAnalyticsId}"]`);
+    if (!parent) {
+      missing += 1;
+      continue;
+    }
+    parent.click();
+    opened += 1;
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  }
+
+  await new Promise((resolve) => window.setTimeout(resolve, 350));
+  return { ok: true, opened, alreadyOpen, missing };
+}
+
 function renderResult(result) {
   resultsBox.replaceChildren();
   currentCourseName = result.courseName || result.pageTitle || "Curso";
+  renderClassOpener(result.classes || []);
   const pageTitle = document.createElement("p");
   pageTitle.className = "summary";
   pageTitle.textContent = `Vista actual: ${result.pageTitle}`;

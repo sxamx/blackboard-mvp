@@ -1,8 +1,9 @@
 const JOB_STORAGE_KEY = "folderDownloadJob";
 const SESSION_URLS_KEY = "folderDownloadSessionUrls";
 const pendingDownloadPaths = new Map();
-const startingJobs = new Set();
-let activeDownloadPath = null;
+const startingItems = new Set();
+const startingItemUrls = new Map();
+const jobMutationTails = new Map();
 
 if (chrome.storage.local.setAccessLevel) {
   void chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" }).catch(() => {});
@@ -18,8 +19,6 @@ chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
   if (belongsToThisExtension(downloadItem) && queue?.length) {
     filename = queue.shift();
     if (!queue.length) pendingDownloadPaths.delete(key);
-  } else if (activeDownloadPath && isCurrentDownload(downloadItem, activeDownloadPath)) {
-    filename = activeDownloadPath.filename;
   }
   if (filename) {
     suggest({ filename, conflictAction: "uniquify" });
@@ -44,7 +43,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 async function handleMessage(message) {
   if (message?.type === "get-folder-download-job") {
     const job = await getJobSnapshot();
-    if (job?.status === "queued") void startNextPending(job.id);
     return { ok: true, job };
   }
   if (message?.type === "start-folder-download-job") return startFolderJob(message);
@@ -55,10 +53,6 @@ async function handleMessage(message) {
 
 async function startFolderJob(message) {
   if (!Array.isArray(message.files) || !message.files.length) throw new Error("No hay archivos para descargar.");
-  const previous = await readJob();
-  if (previous && previous.status !== "complete") {
-    throw new Error("Hay una cola pendiente. Reanúdala o actualiza sus enlaces antes de iniciar otra.");
-  }
 
   const urls = {};
   const items = message.files.map((file) => {
@@ -92,243 +86,311 @@ async function startFolderJob(message) {
     items
   };
 
-  await chrome.storage.session.set({ [SESSION_URLS_KEY]: urls });
-  await saveJob(job);
-  await startNextPending(job.id);
+  const tasks = [];
+  await withJobMutationLock(null, async () => {
+    const previous = await readJob();
+    if (previous && previous.status !== "complete") {
+      throw new Error("Hay una cola pendiente. Reanúdala o actualiza sus enlaces antes de iniciar otra.");
+    }
+    await chrome.storage.session.set({ [SESSION_URLS_KEY]: urls });
+    for (const item of items) {
+      const url = urls[item.id];
+      const key = normalizeDownloadKey(url);
+      const queue = pendingDownloadPaths.get(key) || [];
+      queue.push(item.filename);
+      pendingDownloadPaths.set(key, queue);
+      item.status = "starting";
+      item.startRequestedAt = Date.now();
+      startingItems.add(item.id);
+      startingItemUrls.set(item.id, url);
+      tasks.push({ itemId: item.id, url, filename: item.filename, key });
+    }
+    await saveJob(job);
+  });
+  for (const task of tasks) {
+    void startDownloadForItem(job.id, task).catch(() => {
+      startingItems.delete(task.itemId);
+      startingItemUrls.delete(task.itemId);
+    });
+  }
   return { ok: true, job: await getJobSnapshot() };
+}
+
+async function startDownloadForItem(jobId, task) {
+  let downloadId;
+  try {
+    downloadId = await chrome.downloads.download({
+      url: task.url,
+      filename: task.filename,
+      conflictAction: "uniquify",
+      saveAs: false
+    });
+  } catch {
+    removePendingDownloadPath(task.key, task.filename);
+    await mutateJob(jobId, async (job) => {
+      await removeSessionUrlUnlocked(task.itemId);
+      const item = job.items.find((candidate) => candidate.id === task.itemId);
+      if (!item) return false;
+      item.status = "needs-link";
+      item.downloadId = null;
+      item.canResume = false;
+      item.error = "Edge no pudo iniciar esta descarga. Actualiza el enlace para volver a intentarlo.";
+      return true;
+    });
+    startingItems.delete(task.itemId);
+    startingItemUrls.delete(task.itemId);
+    return;
+  }
+
+  removePendingDownloadPath(task.key, task.filename);
+  let download = null;
+  try {
+    [download] = await chrome.downloads.search({ id: downloadId });
+  } catch {}
+
+  await mutateJob(jobId, async (job) => {
+    await removeSessionUrlUnlocked(task.itemId);
+    const item = job.items.find((candidate) => candidate.id === task.itemId);
+    if (!item) return false;
+    item.downloadIds ||= [];
+    if (!item.downloadIds.includes(downloadId)) item.downloadIds.push(downloadId);
+    item.downloadId = downloadId;
+    if (download) updateItemFromDownload(item, download);
+    else item.status = "downloading";
+    return true;
+  });
+  startingItems.delete(task.itemId);
+  startingItemUrls.delete(task.itemId);
+}
+
+async function startReadyItems(jobId) {
+  const tasks = await withJobMutationLock(jobId, async () => {
+    const job = await readJob();
+    if (!job || job.id !== jobId) return [];
+    const stored = await chrome.storage.session.get(SESSION_URLS_KEY);
+    const urls = stored[SESSION_URLS_KEY] || {};
+    const ready = job.items.filter((item) => item.status === "pending" && urls[item.id]);
+    if (!ready.length) return [];
+
+    const nextTasks = [];
+    for (const item of ready) {
+      const url = urls[item.id];
+      const key = normalizeDownloadKey(url);
+      const queue = pendingDownloadPaths.get(key) || [];
+      queue.push(item.filename);
+      pendingDownloadPaths.set(key, queue);
+      item.status = "starting";
+      item.startRequestedAt = Date.now();
+      item.error = "";
+      startingItems.add(item.id);
+      startingItemUrls.set(item.id, url);
+      nextTasks.push({ itemId: item.id, url, filename: item.filename, key });
+    }
+    await saveJob(job);
+    return nextTasks;
+  });
+
+  for (const task of tasks) {
+    void startDownloadForItem(jobId, task).catch(() => {
+      startingItems.delete(task.itemId);
+      startingItemUrls.delete(task.itemId);
+    });
+  }
+  return tasks.length;
+}
+
+async function removeSessionUrlUnlocked(itemId) {
+  try {
+    const stored = await chrome.storage.session.get(SESSION_URLS_KEY);
+    const urls = stored[SESSION_URLS_KEY] || {};
+    if (!(itemId in urls)) return;
+    delete urls[itemId];
+    await chrome.storage.session.set({ [SESSION_URLS_KEY]: urls });
+  } catch {}
 }
 
 async function resumeFolderJob() {
   const job = await readJob();
   if (!job) throw new Error("No hay una cola guardada.");
-  const item = job.items.find((candidate) => ["paused", "interrupted"].includes(candidate.status) && candidate.downloadId);
-  if (!item) throw new Error("No hay una descarga interrumpida que Edge pueda reanudar.");
+  const candidates = job.items.filter((item) => ["paused", "interrupted"].includes(item.status) && item.downloadId);
+  if (!candidates.length) throw new Error("No hay descargas interrumpidas que Edge pueda reanudar.");
+  let resumed = 0;
+  let needsLinks = 0;
 
-  const [download] = await chrome.downloads.search({ id: item.downloadId });
-  if (download?.state === "complete") {
-    updateItemFromDownload(item, download);
-    await saveJob(job);
-    void startNextPending(job.id);
-    return { ok: true, job: await getJobSnapshot() };
-  }
-  if (download?.state === "in_progress" && !download.paused) {
-    updateItemFromDownload(item, download);
-    await saveJob(job);
-    return { ok: true, job: await getJobSnapshot() };
-  }
-  if (!download?.canResume) {
-    item.status = "needs-link";
-    item.canResume = false;
-    item.downloadId = null;
-    item.error = "Edge no puede continuar este archivo. Actualiza el enlace para volver a intentarlo.";
-    await saveJob(job);
-    return { ok: false, error: item.error, job: await getJobSnapshot() };
-  }
+  await Promise.all(candidates.map(async (candidate) => {
+    const [download] = await chrome.downloads.search({ id: candidate.downloadId });
+    if (download?.state === "complete" || (download?.state === "in_progress" && !download.paused)) {
+      await mutateJob(job.id, (current) => {
+        const item = current.items.find((entry) => entry.id === candidate.id);
+        if (!item) return false;
+        updateItemFromDownload(item, download);
+        return true;
+      });
+      return;
+    }
 
-  try {
-    await chrome.downloads.resume(item.downloadId);
-    item.status = "downloading";
-    item.canResume = false;
-    item.error = "";
-    await saveJob(job);
-    return { ok: true, job: await getJobSnapshot() };
-  } catch {
-    item.status = "needs-link";
-    item.canResume = false;
-    item.downloadId = null;
-    item.error = "Edge no pudo continuar este archivo. Actualiza el enlace para volver a intentarlo.";
-    await saveJob(job);
-    return { ok: false, error: item.error, job: await getJobSnapshot() };
-  }
+    if (download?.canResume) {
+      try {
+        await chrome.downloads.resume(candidate.downloadId);
+        await mutateJob(job.id, (current) => {
+          const item = current.items.find((entry) => entry.id === candidate.id);
+          if (!item) return false;
+          item.status = "downloading";
+          item.canResume = false;
+          item.error = "";
+          return true;
+        });
+        resumed += 1;
+        return;
+      } catch {}
+    }
+
+    await mutateJob(job.id, (current) => {
+      const item = current.items.find((entry) => entry.id === candidate.id);
+      if (!item) return false;
+      item.status = "needs-link";
+      item.canResume = false;
+      item.downloadId = null;
+      item.error = "Edge no pudo continuar este archivo. Actualiza el enlace para volver a intentarlo.";
+      return true;
+    });
+    needsLinks += 1;
+  }));
+
+  return { ok: resumed > 0 || needsLinks === 0, resumed, needsLinks, job: await getJobSnapshot() };
 }
 
 async function refreshFolderJobLinks(links) {
   if (!Array.isArray(links) || !links.length) throw new Error("No encontré enlaces nuevos para la cola.");
-  const job = await readJob();
-  if (!job) throw new Error("No hay una cola guardada.");
-  const stored = await chrome.storage.session.get(SESSION_URLS_KEY);
-  const urls = stored[SESSION_URLS_KEY] || {};
-  let updated = 0;
-
-  for (const link of links) {
-    const item = job.items.find((candidate) => candidate.id === link.itemId);
-    if (!item || !["pending", "needs-link"].includes(item.status)) continue;
-    urls[item.id] = validateDuocDownloadUrl(link.url);
-    item.status = "pending";
-    item.downloadId = null;
-    item.bytesReceived = 0;
-    item.totalBytes = -1;
-    item.canResume = false;
-    item.error = "";
-    updated += 1;
-  }
-
-  if (!updated) throw new Error("No hay archivos pendientes con enlaces que actualizar.");
-  await chrome.storage.session.set({ [SESSION_URLS_KEY]: urls });
-  await saveJob(job);
-  await startNextPending(job.id);
-  return { ok: true, updated, job: await getJobSnapshot() };
-}
-
-async function startNextPending(jobId) {
-  if (startingJobs.has(jobId)) return;
-  startingJobs.add(jobId);
-  let advance = false;
-
-  try {
+  const updated = await withJobMutationLock(null, async () => {
     const job = await readJob();
-    if (!job || job.id !== jobId) return;
+    if (!job) throw new Error("No hay una cola guardada.");
     const stored = await chrome.storage.session.get(SESSION_URLS_KEY);
     const urls = stored[SESSION_URLS_KEY] || {};
-    const item = job.items.find((candidate) => candidate.status !== "complete");
+    let count = 0;
 
-    if (!item) {
-      job.status = "complete";
-      await chrome.storage.session.remove(SESSION_URLS_KEY);
-      await saveJob(job);
-      return;
-    }
-    if (["starting", "downloading", "paused", "interrupted"].includes(item.status)) return;
-    if (item.status === "needs-link") return;
-
-    const url = urls[item.id];
-    if (!url) {
-      item.status = "needs-link";
-      item.error = "Abre Blackboard y detecta nuevamente esta clase para actualizar el enlace.";
-      await saveJob(job);
-      return;
+    for (const link of links) {
+      const item = job.items.find((candidate) => candidate.id === link.itemId);
+      if (!item || !["pending", "needs-link"].includes(item.status)) continue;
+      urls[item.id] = validateDuocDownloadUrl(link.url);
+      item.status = "pending";
+      item.downloadId = null;
+      item.bytesReceived = 0;
+      item.totalBytes = -1;
+      item.canResume = false;
+      item.error = "";
+      count += 1;
     }
 
-    const key = normalizeDownloadKey(url);
-    const queue = pendingDownloadPaths.get(key) || [];
-    queue.push(item.filename);
-    pendingDownloadPaths.set(key, queue);
-    activeDownloadPath = { url, key, filename: item.filename };
-    item.status = "starting";
-    item.startRequestedAt = Date.now();
-    item.error = "";
-    await saveJob(job);
-
-    let downloadId;
-    try {
-      downloadId = await chrome.downloads.download({
-        url,
-        filename: item.filename,
-        conflictAction: "uniquify",
-        saveAs: false
-      });
-    } catch {
-      removePendingDownloadPath(key, item.filename);
-      delete urls[item.id];
-      await chrome.storage.session.set({ [SESSION_URLS_KEY]: urls });
-      item.status = "needs-link";
-      item.error = "Edge no pudo iniciar este archivo. Actualiza el enlace para volver a intentarlo.";
-      await saveJob(job);
-      return;
-    } finally {
-      activeDownloadPath = null;
-    }
-
-    delete urls[item.id];
+    if (!count) throw new Error("No hay archivos pendientes con enlaces que actualizar.");
     await chrome.storage.session.set({ [SESSION_URLS_KEY]: urls });
-    item.downloadId = downloadId;
-    item.downloadIds.push(downloadId);
-    item.status = "downloading";
-    item.canResume = false;
-
-    try {
-      const [download] = await chrome.downloads.search({ id: downloadId });
-      if (download) updateItemFromDownload(item, download);
-    } catch {}
     await saveJob(job);
-    advance = item.status === "complete";
-  } finally {
-    startingJobs.delete(jobId);
-  }
-
-  if (advance) await startNextPending(jobId);
+    return { jobId: job.id, count };
+  });
+  await startReadyItems(updated.jobId);
+  return { ok: true, updated: updated.count, job: await getJobSnapshot() };
 }
 
 async function handleDownloadChanged(delta) {
-  const job = await readJob();
-  if (!job) return;
-  const item = job.items.find((candidate) => candidate.downloadId === delta.id);
-  if (!item) return;
-
   const [download] = await chrome.downloads.search({ id: delta.id });
   if (!download) return;
-  const previousStatus = item.status;
-  updateItemFromDownload(item, download);
-  await saveJob(job);
-
-  if (item.status === "complete" && previousStatus !== "complete") {
-    void startNextPending(job.id);
-  }
+  const job = await readJob();
+  if (!job) return;
+  await mutateJob(job.id, (current) => {
+    let item = current.items.find((candidate) => candidate.downloadId === delta.id);
+    if (!item) item = findStartingItem(current, download);
+    if (!item) return false;
+    item.downloadIds ||= [];
+    if (!item.downloadIds.includes(delta.id)) item.downloadIds.push(delta.id);
+    item.downloadId = delta.id;
+    startingItems.delete(item.id);
+    startingItemUrls.delete(item.id);
+    updateItemFromDownload(item, download);
+    return true;
+  });
 }
 
 async function getJobSnapshot() {
-  const job = await readJob();
-  if (!job) return null;
-  const stored = await chrome.storage.session.get(SESSION_URLS_KEY);
-  const urls = stored[SESSION_URLS_KEY] || {};
-  const liveItems = new Map();
-  let changed = false;
+  const snapshot = await withJobMutationLock(null, async () => {
+    const job = await readJob();
+    if (!job) return null;
+    const stored = await chrome.storage.session.get(SESSION_URLS_KEY);
+    const urls = stored[SESSION_URLS_KEY] || {};
+    const liveItems = new Map();
+    let changed = false;
 
-  for (const item of job.items) {
-    if (item.status === "starting" && !item.downloadId) {
-      const recovered = startingJobs.has(job.id) ? null : await findRecentDownload(job, item);
-      if (startingJobs.has(job.id)) continue;
-      if (recovered) {
-        item.downloadId = recovered.id;
-        item.downloadIds.push(recovered.id);
-        updateItemFromDownload(item, recovered);
-        delete urls[item.id];
-        changed = true;
-      } else if (urls[item.id]) {
-        item.status = "pending";
-        changed = true;
-      } else {
+    for (const item of job.items) {
+      if (item.status === "starting" && !item.downloadId) {
+        if (startingItems.has(item.id)) continue;
+        const recovered = await findRecentDownload(job, item);
+        if (recovered) {
+          item.downloadId = recovered.id;
+          item.downloadIds ||= [];
+          if (!item.downloadIds.includes(recovered.id)) item.downloadIds.push(recovered.id);
+          updateItemFromDownload(item, recovered);
+          delete urls[item.id];
+          changed = true;
+        } else if (urls[item.id]) {
+          item.status = "pending";
+          changed = true;
+        } else {
+          item.status = "needs-link";
+          changed = true;
+        }
+      }
+
+      if (item.downloadId && ["starting", "downloading", "paused", "interrupted"].includes(item.status)) {
+        const [download] = await chrome.downloads.search({ id: item.downloadId });
+        if (download) {
+          if (updateItemFromDownload(item, download, false)) changed = true;
+          liveItems.set(item.id, { bytesReceived: download.bytesReceived, totalBytes: download.totalBytes });
+        } else {
+          item.downloadId = null;
+          item.status = "needs-link";
+          item.canResume = false;
+          item.error = "Edge ya no tiene esta descarga en su historial. Actualiza el enlace para reintentarlo.";
+          changed = true;
+        }
+      }
+
+      if (item.status === "pending" && !urls[item.id]) {
         item.status = "needs-link";
+        item.error = "Abre Blackboard y detecta nuevamente esta clase para actualizar el enlace.";
         changed = true;
       }
     }
 
-    if (item.downloadId && ["starting", "downloading", "paused", "interrupted"].includes(item.status)) {
-      const [download] = await chrome.downloads.search({ id: item.downloadId });
-      if (download) {
-        if (updateItemFromDownload(item, download, false)) changed = true;
-        liveItems.set(item.id, { bytesReceived: download.bytesReceived, totalBytes: download.totalBytes });
-      } else {
-        item.downloadId = null;
-        item.status = "needs-link";
-        item.canResume = false;
-        item.error = "Edge ya no tiene esta descarga en su historial. Actualiza el enlace para reintentarlo.";
-        changed = true;
-      }
-    }
-
-    if (item.status === "pending" && !urls[item.id]) {
-      item.status = "needs-link";
-      item.error = "Abre Blackboard y detecta nuevamente esta clase para actualizar el enlace.";
+    const nextStatus = deriveJobStatus(job, urls);
+    if (job.status !== nextStatus) {
+      job.status = nextStatus;
       changed = true;
     }
-  }
+    if (changed) {
+      await chrome.storage.session.set({ [SESSION_URLS_KEY]: urls });
+      await saveJob(job);
+    }
 
-  const nextStatus = deriveJobStatus(job, urls);
-  if (job.status !== nextStatus) {
-    job.status = nextStatus;
-    changed = true;
-  }
-  if (changed) {
-    await chrome.storage.session.set({ [SESSION_URLS_KEY]: urls });
-    await saveJob(job);
-  }
+    return {
+      job: { ...job, items: job.items.map((item) => ({ ...item, ...(liveItems.get(item.id) || {}) })) },
+      hasResumablePending: job.items.some((item) => item.status === "pending" && urls[item.id])
+    };
+  });
+  if (!snapshot) return null;
+  if (snapshot.hasResumablePending) void startReadyItems(snapshot.job.id);
+  return snapshot.job;
+}
 
-  const snapshot = {
-    ...job,
-    items: job.items.map((item) => ({ ...item, ...(liveItems.get(item.id) || {}) }))
-  };
-  return snapshot;
+function findStartingItem(job, download) {
+  if (!belongsToThisExtension(download)) return null;
+  const urlKey = normalizeDownloadKey(download.url);
+  const candidates = job.items.filter((item) => item.status === "starting" && !item.downloadId && startingItems.has(item.id)
+    && normalizeDownloadKey(startingItemUrls.get(item.id) || "") === urlKey);
+  if (!candidates.length) return null;
+  if (download.filename) {
+    const match = candidates.find((item) => pathEndsWith(download.filename, item.filename));
+    if (match) return match;
+  }
+  return candidates.sort((a, b) => (a.startRequestedAt || 0) - (b.startRequestedAt || 0))[0];
 }
 
 async function findRecentDownload(job, item) {
@@ -396,14 +458,35 @@ async function readJob() {
 }
 
 function deriveJobStatus(job, urls) {
-  const item = job.items.find((candidate) => candidate.status !== "complete");
-  if (!item) return "complete";
-  if (item.status === "downloading" || item.status === "starting") return "downloading";
-  if (item.status === "paused") return "paused";
-  if (item.status === "interrupted") return "interrupted";
-  if (item.status === "needs-link") return "needs-links";
-  if (item.status === "pending") return urls[item.id] ? "queued" : "needs-links";
+  if (job.items.every((item) => item.status === "complete")) return "complete";
+  if (job.items.some((item) => ["starting", "downloading"].includes(item.status))) return "downloading";
+  if (job.items.some((item) => item.status === "paused")) return "paused";
+  if (job.items.some((item) => item.status === "interrupted")) return "interrupted";
+  if (job.items.some((item) => item.status === "needs-link" || (item.status === "pending" && !urls[item.id]))) return "needs-links";
+  if (job.items.some((item) => item.status === "pending" && urls[item.id])) return "queued";
   return "needs-links";
+}
+
+async function withJobMutationLock(_jobId, operation) {
+  const lockKey = JOB_STORAGE_KEY;
+  const previous = jobMutationTails.get(lockKey) || Promise.resolve();
+  const current = previous.catch(() => {}).then(operation);
+  jobMutationTails.set(lockKey, current);
+  try {
+    return await current;
+  } finally {
+    if (jobMutationTails.get(lockKey) === current) jobMutationTails.delete(lockKey);
+  }
+}
+
+async function mutateJob(jobId, operation) {
+  return withJobMutationLock(jobId, async () => {
+    const job = await readJob();
+    if (!job || job.id !== jobId) return null;
+    const changed = await operation(job);
+    if (changed !== false) await saveJob(job);
+    return job;
+  });
 }
 
 function validateDuocDownloadUrl(value) {
@@ -447,19 +530,6 @@ function normalizeDownloadKey(url) {
 
 function belongsToThisExtension(downloadItem) {
   return !downloadItem.byExtensionId || downloadItem.byExtensionId === chrome.runtime.id;
-}
-
-function isCurrentDownload(downloadItem, active) {
-  if (!belongsToThisExtension(downloadItem)) return false;
-  const itemKey = normalizeDownloadKey(downloadItem.url);
-  if (itemKey === active.key) return true;
-  try {
-    const itemUrl = new URL(downloadItem.url);
-    const activeUrl = new URL(active.url);
-    return itemUrl.origin === activeUrl.origin && itemUrl.pathname === activeUrl.pathname;
-  } catch {
-    return false;
-  }
 }
 
 function removePendingDownloadPath(key, filename) {

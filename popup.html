@@ -14,12 +14,24 @@
 
       <button id="scan" class="primary" type="button">Detectar clases y archivos</button>
 
+      <section id="class-opener" class="class-opener" hidden>
+        <h2>Abrir clases</h2>
+        <p class="muted opener-help">Selecciona las carpetas que quieres expandir en Blackboard para que el detector pueda leer sus archivos.</p>
+        <label class="select-all-row opener-select-all">
+          <input id="open-all-classes" type="checkbox">
+          <span>Seleccionar todas las clases</span>
+        </label>
+        <ul id="open-class-list" class="open-class-list"></ul>
+        <button id="open-classes-button" class="job-action" type="button" disabled>Abrir clases seleccionadas</button>
+        <p id="open-classes-status" class="muted opener-status" role="status"></p>
+      </section>
+
       <section id="download-job" class="download-job" aria-live="polite" hidden>
         <h2>Cola de descargas</h2>
         <p id="job-summary" class="job-summary"></p>
         <p id="job-help" class="muted job-help"></p>
         <ul id="job-items" class="job-items"></ul>
-        <button id="resume-job" class="job-action" type="button" hidden>Reanudar archivo interrumpido</button>
+        <button id="resume-job" class="job-action" type="button" hidden>Reanudar archivos interrumpidos</button>
         <button id="refresh-job-links" class="job-action" type="button" hidden>Actualizar enlaces pendientes</button>
       </section>
 
@@ -33,7 +45,7 @@
         <option value="folder">Carpeta del curso con subcarpetas por clase</option>
         <option value="zip">Un ZIP con subcarpetas por clase</option>
       </select>
-      <p class="format-help">Carpeta: cola de archivos separados en Descargas/&lt;curso&gt;/&lt;clase&gt;, con progreso recuperable. ZIP: un solo archivo de hasta 50 MB; no guarda progreso intermedio.</p>
+      <p class="format-help">Carpeta: envía todos los archivos a Edge y los ordena en Descargas/&lt;curso&gt;/&lt;clase&gt;; cada ventana nativa de Guardar aún puede requerir tu confirmación. ZIP: hasta 100 MB de contenido; el ZIP puede ser algo mayor y no guarda progreso intermedio.</p>
       <button id="download-selected" class="download" type="button" disabled>Descargar seleccionados</button>
       <p id="status" class="status" role="status">Marcar casillas no descarga nada. La descarga inicia solo al pulsar el botón.</p>
       <p class="footnote">v<span id="version"></span> · La selección es temporal. El progreso de carpetas se guarda en este equipo.</p>

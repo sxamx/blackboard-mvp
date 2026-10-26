@@ -797,13 +797,21 @@ function renderClassOpener(classes) {
 }
 
 async function expandSelectedBlackboardFolders(requestedNames) {
+  const logPrefix = "[DuocClassOpener]";
   const analyticsId = "course.learningModule.tableOfContents.folder.list.folder.item.list-item";
   const parentAnalyticsId = "course.learningModule.tableOfContents.folder.list.folder.item.list-item-parent";
-  const scope = document.querySelector(".js-content-navigation-drawer") || document;
+  const drawer = document.querySelector(".js-content-navigation-drawer");
+  const scope = drawer || document;
   const normalize = (value) => String(value || "").normalize("NFC").replace(/\s+/g, " ").trim().toLocaleLowerCase();
   const classNumber = (value) => String(value || "").match(/\bCLASE\s+(?:N\s*[°ºo.]?\s*)?(\d{1,3})\b/i)?.[1] || "";
   const parentSelector = `[data-analytics-id="${parentAnalyticsId}"]`;
   const rowSelector = `li[data-analytics-id="${analyticsId}"]`;
+  console.info(logPrefix, "inicio", {
+    requestedCount: requestedNames.length,
+    drawerFound: Boolean(drawer),
+    folderRows: scope.querySelectorAll(rowSelector).length,
+    folderControls: scope.querySelectorAll(parentSelector).length
+  });
   let opened = 0;
   let alreadyOpen = 0;
   let missing = 0;
@@ -836,32 +844,65 @@ async function expandSelectedBlackboardFolders(requestedNames) {
     return style.display === "none" || (collapse.offsetHeight === 0 && style.height === "0px");
   }
 
-  for (const requestedName of requestedNames) {
+  function describeState(control) {
+    const collapse = folderCollapse(control);
+    const collapseText = collapse?.innerText || collapse?.textContent || "";
+    const style = collapse ? window.getComputedStyle(collapse) : null;
+    return {
+      controlFound: Boolean(control),
+      rowFound: Boolean(control?.closest(rowSelector) || control?.closest("li")),
+      collapseFound: Boolean(collapse),
+      expanded: collapse ? !isCollapsed(collapse) : false,
+      collapseClasses: collapse?.className || "",
+      height: style?.height || "",
+      childCount: collapse?.children.length || 0,
+      loadingIndicator: Boolean(collapse?.querySelector('[data-testid*="skeleton" i], [aria-label*="cargando" i]'))
+        || /\bcargando\b|\bloading\b/i.test(collapseText),
+      textLength: collapseText.length
+    };
+  }
+
+  for (let index = 0; index < requestedNames.length; index += 1) {
+    const requestedName = requestedNames[index];
+    const classId = classNumber(requestedName) || `selección-${index + 1}`;
     const parent = findFolderControl(requestedName);
     if (!parent) {
       missing += 1;
+      console.warn(logPrefix, "control-no-encontrado", { classId });
       continue;
     }
 
     const collapse = folderCollapse(parent);
     if (!collapse) {
       missing += 1;
+      console.warn(logPrefix, "panel-no-encontrado", { classId, state: describeState(parent) });
       continue;
     }
+    console.info(logPrefix, "antes-del-clic", { classId, state: describeState(parent) });
     if (!isCollapsed(collapse)) {
       alreadyOpen += 1;
+      console.info(logPrefix, "ya-estaba-abierta", { classId });
       continue;
     }
 
     parent.click();
+    console.info(logPrefix, "clic-enviado", { classId });
     await new Promise((resolve) => window.setTimeout(resolve, 120));
     const updatedControl = findFolderControl(requestedName);
-    if (updatedControl && !isCollapsed(folderCollapse(updatedControl))) opened += 1;
-    else failed += 1;
+    const state = describeState(updatedControl);
+    if (updatedControl && state.expanded) {
+      opened += 1;
+      console.info(logPrefix, "despues-del-clic", { classId, state });
+    } else {
+      failed += 1;
+      console.warn(logPrefix, "sin-expansion-detectada", { classId, state });
+    }
   }
 
   if (opened || alreadyOpen) await new Promise((resolve) => window.setTimeout(resolve, 350));
-  return { ok: true, opened, alreadyOpen, missing, failed };
+  const result = { ok: true, opened, alreadyOpen, missing, failed };
+  console.info(logPrefix, "fin", result);
+  return result;
 }
 
 function renderResult(result) {

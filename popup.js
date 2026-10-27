@@ -1,11 +1,12 @@
-const scanAgainButton = document.getElementById("scan-again");
-const scanStartButton = document.getElementById("scan-start");
+const scanButton = document.getElementById("scan");
+const classOpener = document.getElementById("class-opener");
+const openAllClassesCheckbox = document.getElementById("open-all-classes");
+const openClassList = document.getElementById("open-class-list");
 const openClassesButton = document.getElementById("open-classes-button");
+const openClassesStatus = document.getElementById("open-classes-status");
 const resultsBox = document.getElementById("results");
-const selectVisibleHost = document.getElementById("select-visible-host");
 const statusBox = document.getElementById("status");
 const selectionSummary = document.getElementById("selection-summary");
-const visibleCount = document.getElementById("visible-count");
 const downloadButton = document.getElementById("download-selected");
 const downloadFormat = document.getElementById("download-format");
 const downloadJobPanel = document.getElementById("download-job");
@@ -14,7 +15,6 @@ const jobHelp = document.getElementById("job-help");
 const jobItemsBox = document.getElementById("job-items");
 const jobStatusBadge = document.getElementById("job-status-badge");
 const jobProgress = document.getElementById("job-progress");
-const jobProgressLabel = document.getElementById("job-progress-label");
 const resumeJobButton = document.getElementById("resume-job");
 const refreshJobLinksButton = document.getElementById("refresh-job-links");
 const clearJobButton = document.getElementById("clear-job");
@@ -23,18 +23,16 @@ const queueView = document.getElementById("queue-view");
 const classesTabButton = document.getElementById("tab-classes");
 const queueTabButton = document.getElementById("tab-queue");
 const classesTabCount = document.getElementById("classes-tab-count");
-const queueTabIndicator = document.getElementById("queue-tab-indicator");
+const queueTabCount = document.getElementById("queue-tab-count");
 const queueEmpty = document.getElementById("queue-empty");
 const queueStatusBox = document.getElementById("queue-status");
 const queueGoClassesButton = document.getElementById("queue-go-classes");
 const scanWelcome = document.getElementById("scan-welcome");
 const classWorkspace = document.getElementById("class-workspace");
-const scanFooter = document.getElementById("scan-footer");
 const downloadPanel = document.getElementById("download-panel");
-const queueFooter = document.getElementById("queue-footer");
-const queueFooterStatus = document.getElementById("queue-footer-status");
-const queueFormatLabel = document.getElementById("queue-format-label");
 const courseTitle = document.getElementById("course-title");
+const openClassCount = document.getElementById("open-class-count");
+const jobProgressLabel = document.getElementById("job-progress-label");
 const formatHelp = document.getElementById("format-help");
 document.getElementById("version").textContent = chrome.runtime.getManifest().version;
 let currentSelectionRecords = [];
@@ -55,13 +53,8 @@ function updateDownloadButton() {
   const selected = selectedFileRecords();
   const isZip = downloadFormat.value === "zip";
   const isLoose = downloadFormat.value === "loose";
-  const countLabel = selected.length === 1 ? "1 archivo" : selected.length + " archivos";
-  downloadButton.replaceChildren();
-  const icon = document.createElement("span");
-  icon.className = "button-icon";
-  icon.setAttribute("aria-hidden", "true");
-  icon.textContent = isZip ? "▣" : "↓";
-  downloadButton.append(icon, document.createTextNode(isZip ? "Crear ZIP · " + countLabel : "Descargar " + countLabel));
+  const countLabel = selected.length === 1 ? "1 archivo" : `${selected.length} archivos`;
+  downloadButton.textContent = isZip ? `Crear ZIP · ${countLabel}` : `Descargar ${countLabel}`;
   formatHelp.textContent = isZip
     ? "Un ZIP con una subcarpeta por clase. Límite actual: 100 MB de contenido."
     : isLoose
@@ -75,6 +68,7 @@ function updateDownloadButton() {
   const folderJobActive = !isZip && latestDownloadJob && latestDownloadJob.status !== "complete";
   downloadButton.disabled = downloadInProgress || Boolean(folderJobActive) || selected.length === 0 || selected.some((record) => !record.url);
 }
+
 for (const button of document.querySelectorAll(".format-option")) {
   button.addEventListener("click", () => {
     downloadFormat.value = button.dataset.format;
@@ -111,15 +105,23 @@ for (const [index, button] of [classesTabButton, queueTabButton].entries()) {
 }
 queueGoClassesButton.addEventListener("click", () => showView("classes"));
 
+openAllClassesCheckbox.addEventListener("change", () => {
+  for (const checkbox of openClassList.querySelectorAll('input[type="checkbox"]')) {
+    checkbox.checked = openAllClassesCheckbox.checked;
+  }
+  updateOpenClassesButton();
+});
+
 openClassesButton.addEventListener("click", async () => {
-  const selectedNames = [...resultsBox.querySelectorAll(".open-class-checkbox:checked")]
-    .map((checkbox) => currentClassNames[Number(checkbox.dataset.classIndex)])
-    .filter(Boolean);
+  const selectedNames = currentClassNames.filter((_name, index) => {
+    const checkbox = openClassList.querySelector(`[data-class-index="${index}"]`);
+    return checkbox?.checked;
+  });
   if (!selectedNames.length || currentTabId === null) return;
 
   openingClasses = true;
   updateOpenClassesButton();
-  statusBox.textContent = "Abriendo " + selectedNames.length + " clase(s) en Blackboard…";
+  openClassesStatus.textContent = `Abriendo ${selectedNames.length} clase(s) en Blackboard…`;
   try {
     const [outcome] = await chrome.scripting.executeScript({
       target: { tabId: currentTabId },
@@ -130,24 +132,25 @@ openClassesButton.addEventListener("click", async () => {
     const result = outcome?.result;
     if (!result?.ok) throw new Error(result?.error || "No pude abrir las clases seleccionadas.");
     const parts = [];
-    if (result.opened) parts.push(result.opened + " abierta(s)");
-    if (result.alreadyOpen) parts.push(result.alreadyOpen + " ya estaba(n) abierta(s)");
-    if (result.missing) parts.push(result.missing + " no encontrada(s)");
-    if (result.failed) parts.push(result.failed + " no se pudo expandir");
+    if (result.opened) parts.push(`${result.opened} abierta(s)`);
+    if (result.alreadyOpen) parts.push(`${result.alreadyOpen} ya estaba(n) abierta(s)`);
+    if (result.missing) parts.push(`${result.missing} no encontrada(s)`);
+    if (result.failed) parts.push(`${result.failed} no se pudo expandir`);
+    openClassesStatus.textContent = `${parts.join(", ")}. Actualizando archivos visibles…`;
     if (result.opened || result.alreadyOpen) {
-      statusBox.textContent = parts.join(", ") + ". Actualizando archivos visibles…";
       await new Promise((resolve) => window.setTimeout(resolve, 450));
-      await scanCurrentPage({ preserveOpenNames: selectedNames });
+      scanButton.click();
     } else {
-      statusBox.textContent = parts.join(", ") + ". Revisa los logs [DuocClassOpener] en la consola de Blackboard.";
+      openClassesStatus.textContent = `${parts.join(", ")}. No pude localizar un control de carpeta; revisa los logs [DuocClassOpener] en la consola de Blackboard.`;
     }
   } catch (error) {
-    statusBox.textContent = error.message || "No pude abrir las clases seleccionadas.";
+    openClassesStatus.textContent = error.message || "No pude abrir las clases seleccionadas.";
   } finally {
     openingClasses = false;
     updateOpenClassesButton();
   }
 });
+
 resumeJobButton.addEventListener("click", async () => {
   resumeJobButton.disabled = true;
   jobHelp.textContent = "Intentando reanudar en Edge…";
@@ -437,24 +440,23 @@ async function getActiveBlackboardTab() {
   return tab;
 }
 
-async function scanCurrentPage({ preserveOpenNames = [] } = {}) {
+scanButton.addEventListener("click", async () => {
   statusBox.textContent = "Leyendo nombres ya cargados en la pestaña…";
-  scanWelcome.hidden = true;
-  classWorkspace.hidden = false;
-  scanFooter.hidden = true;
+  classOpener.hidden = true;
   downloadPanel.hidden = true;
   resultsBox.replaceChildren();
-  const loading = document.createElement("p");
-  loading.className = "muted";
-  loading.textContent = "Actualizando la lista de clases y archivos…";
-  resultsBox.append(loading);
+  if (!classWorkspace.hidden) {
+    resultsBox.hidden = false;
+    const loading = document.createElement("p");
+    loading.className = "muted";
+    loading.textContent = "Actualizando la lista de clases y archivos…";
+    resultsBox.append(loading);
+  }
   currentSelectionRecords = [];
-  selectionSummary.textContent = "0 archivos · 0 clases";
+  selectionSummary.textContent = "0 archivos seleccionados.";
   updateDownloadButton();
-  scanAgainButton.disabled = true;
-  scanStartButton.disabled = true;
-  scanAgainButton.textContent = "Detectando…";
-  scanStartButton.textContent = "Detectando clases y archivos…";
+  scanButton.disabled = true;
+  scanButton.textContent = classWorkspace.hidden ? "Detectando…" : "Actualizando…";
   try {
     const tab = await getActiveBlackboardTab();
     currentTabId = tab.id;
@@ -464,33 +466,29 @@ async function scanCurrentPage({ preserveOpenNames = [] } = {}) {
       world: "MAIN",
       func: inspectClassInventory
     });
-    renderResult(result?.result || { pageTitle: "Título no visible", courseName: "Curso", classes: [], filesWithoutClass: [], fileCount: 0 }, { preserveOpenNames });
+    renderResult(result?.result || { pageTitle: "Título no visible", courseName: "Curso", classes: [], filesWithoutClass: [], fileCount: 0 });
     void refreshDownloadJob();
   } catch (error) {
+    scanWelcome.hidden = true;
+    classWorkspace.hidden = false;
+    resultsBox.hidden = false;
     resultsBox.replaceChildren();
     const message = document.createElement("p");
-    message.className = "scan-error";
+    message.className = "muted";
     message.textContent = error.message || "No pude leer esta página.";
     resultsBox.append(message);
-    scanFooter.hidden = false;
-    downloadPanel.hidden = true;
-    scanStartButton.textContent = "Intentar de nuevo";
-    selectionSummary.textContent = "0 archivos · 0 clases";
+    classOpener.hidden = true;
     currentSelectionRecords = [];
+    selectionSummary.textContent = "0 archivos seleccionados.";
     updateDownloadButton();
     statusBox.textContent = "No se modificó el curso.";
     void refreshDownloadJob();
   } finally {
-    scanAgainButton.disabled = false;
-    scanStartButton.disabled = false;
-    scanAgainButton.textContent = "Detectar";
-    if (classWorkspace.hidden) scanStartButton.textContent = "Detectar clases y archivos";
-    else if (!scanFooter.hidden) scanStartButton.textContent = "Detectar de nuevo";
+    scanButton.disabled = false;
+    scanButton.textContent = classWorkspace.hidden ? "Detectar clases y archivos" : "Detectar de nuevo";
   }
-}
+});
 
-scanAgainButton.addEventListener("click", () => void scanCurrentPage());
-scanStartButton.addEventListener("click", () => void scanCurrentPage());
 downloadButton.addEventListener("click", async () => {
   const selected = selectedFileRecords();
   if (!selected.length || selected.some((record) => !record.url)) return;
@@ -559,25 +557,14 @@ async function refreshDownloadJob() {
   } catch {}
 }
 
-function fileTypeBadge(name) {
-  const extension = String(name || "").split(".").pop().toLowerCase();
-  if (extension === "pdf") return { label: "PDF", className: "file-type-pdf" };
-  if (["ppt", "pptx", "odp"].includes(extension)) return { label: "PPT", className: "file-type-ppt" };
-  if (["xls", "xlsx", "ods", "csv"].includes(extension)) return { label: "XLS", className: "file-type-xls" };
-  if (["zip", "rar", "7z"].includes(extension)) return { label: "ZIP", className: "file-type-zip" };
-  if (["doc", "docx", "odt", "rtf"].includes(extension)) return { label: "DOC", className: "file-type-doc" };
-  return { label: extension ? extension.slice(0, 4).toUpperCase() : "FILE", className: "file-type-generic" };
-}
-
 function renderDownloadJob(job) {
   latestDownloadJob = job;
   matchingRefreshLinks = job ? findRefreshableLinks(job) : [];
   if (!job) {
     queueEmpty.hidden = false;
     downloadJobPanel.hidden = true;
-    queueFooter.hidden = true;
-    queueTabIndicator.hidden = true;
-    queueTabIndicator.classList.remove("is-attention");
+    queueTabCount.textContent = "";
+    queueTabCount.hidden = true;
     jobStatusBadge.textContent = "";
     jobProgress.value = 0;
     jobProgressLabel.textContent = "0%";
@@ -588,29 +575,25 @@ function renderDownloadJob(job) {
   queueStatusBox.textContent = "";
   queueEmpty.hidden = true;
   downloadJobPanel.hidden = false;
-  queueFooter.hidden = false;
   const total = job.items.length;
   const completed = job.items.filter((item) => item.status === "complete").length;
   const activeItems = job.items.filter((item) => item.status === "downloading" || item.status === "starting");
   const active = activeItems.find((item) => item.status === "downloading") || activeItems[0];
   const resumable = job.items.filter((item) => item.canResume && ["paused", "interrupted"].includes(item.status));
   const needsLinks = job.items.filter((item) => item.status === "needs-link");
-  const interrupted = job.items.filter((item) => ["paused", "interrupted"].includes(item.status));
-  const waiting = job.items.filter((item) => ["pending", "queued"].includes(item.status)).length;
   const unfinished = Math.max(0, total - completed);
-  const needsAttention = needsLinks.length > 0 || resumable.length > 0 || ["paused", "interrupted", "needs-links"].includes(job.status);
-  queueTabIndicator.hidden = unfinished === 0;
-  queueTabIndicator.classList.toggle("is-attention", needsAttention);
-  queueTabIndicator.setAttribute("aria-label", needsAttention ? "La cola requiere atención" : unfinished + " archivo(s) pendientes o en curso");
+  queueTabCount.textContent = unfinished ? String(unfinished) : "";
+  queueTabCount.hidden = unfinished === 0;
+  queueTabCount.setAttribute("aria-label", unfinished ? `${unfinished} archivo(s) pendientes o en curso` : "Cola completada");
   if (!currentTabId) {
     currentCourseName = job.courseName || currentCourseName;
     courseTitle.textContent = currentCourseName;
   }
 
-  jobSummary.textContent = completed + " de " + total + " archivos completados";
+  jobSummary.textContent = `${job.courseName}: ${completed} de ${total} archivos completados.`;
   jobProgress.max = Math.max(1, total);
   jobProgress.value = completed;
-  jobProgressLabel.textContent = Math.floor(completed / Math.max(1, total) * 100) + "%";
+  jobProgressLabel.textContent = `${Math.floor(completed / Math.max(1, total) * 100)}%`;
   const statusLabels = {
     downloading: "Activa",
     queued: "Pendiente",
@@ -621,47 +604,34 @@ function renderDownloadJob(job) {
   };
   const badgeStatus = statusLabels[job.status] ? job.status : "needs-links";
   jobStatusBadge.textContent = statusLabels[badgeStatus];
-  jobStatusBadge.className = "job-badge job-badge-" + badgeStatus;
+  jobStatusBadge.className = `job-badge job-badge-${badgeStatus}`;
 
   if (job.status === "complete") {
     jobHelp.textContent = "La cola terminó. Puedes iniciar otra descarga cuando quieras.";
   } else if (active) {
     const received = Number(active.bytesReceived) || 0;
     const totalBytes = Number(active.totalBytes);
-    const percent = totalBytes > 0 ? " (" + Math.min(100, Math.floor(received / totalBytes * 100)) + "%)" : "";
+    const percent = totalBytes > 0 ? ` (${Math.min(100, Math.floor(received / totalBytes * 100))}%)` : "";
     const startingCount = activeItems.filter((item) => item.status === "starting").length;
-    const waitingText = startingCount ? startingCount + " esperando inicio o confirmación de Guardar. " : "";
-    const progressText = active.status === "starting" ? "" : "Descargando " + active.name + percent + ". ";
-    jobHelp.textContent = activeItems.length + " solicitud(es) en Edge. " + waitingText + progressText + "Puedes cerrar este panel; la cola sigue en Edge.";
+    const waitingText = startingCount ? `${startingCount} esperando inicio o confirmación de Guardar. ` : "";
+    const progressText = active.status === "starting" ? "" : `Descargando ${active.name}${percent}. `;
+    jobHelp.textContent = `${activeItems.length} solicitud(es) en Edge. ${waitingText}${progressText}Puedes cerrar este panel; la cola sigue en Edge.`;
   } else if (resumable.length) {
-    jobHelp.textContent = resumable.length + " archivo(s) se pueden reanudar desde donde se interrumpieron.";
+    jobHelp.textContent = `${resumable.length} archivo(s) se pueden reanudar desde donde se interrumpieron.`;
   } else if (needsLinks.length && matchingRefreshLinks.length) {
-    jobHelp.textContent = "Detecté enlaces para " + matchingRefreshLinks.length + " de " + needsLinks.length + " archivo(s) pendientes. Pulsa el botón para reanudar la cola.";
+    jobHelp.textContent = `Detecté enlaces para ${matchingRefreshLinks.length} de ${needsLinks.length} archivo(s) pendientes. Pulsa el botón para reanudar la cola.`;
   } else if (needsLinks.length) {
-    jobHelp.textContent = "Faltan enlaces para " + needsLinks.length + " archivo(s). Abre Blackboard, detecta el contenido y usa las casillas de clase para expandir carpetas.";
-  } else if (interrupted.length) {
-    jobHelp.textContent = interrupted.length + " archivo(s) interrumpido(s) no se pueden reanudar en Edge. Actualiza sus enlaces desde Blackboard para volver a intentarlos.";
+    jobHelp.textContent = `Faltan enlaces para ${needsLinks.length} archivo(s). Abre Blackboard, detecta el contenido y usa Abrir clases para expandir las carpetas pendientes.`;
   } else {
     jobHelp.textContent = "La cola está esperando que Edge actualice el estado de la descarga.";
   }
 
   resumeJobButton.hidden = !resumable.length;
   resumeJobButton.textContent = resumable.length > 1
-    ? "Reanudar archivos interrumpidos (" + resumable.length + ")"
+    ? `Reanudar archivos interrumpidos (${resumable.length})`
     : "Reanudar archivo interrumpido";
   refreshJobLinksButton.hidden = !matchingRefreshLinks.length;
-  refreshJobLinksButton.textContent = "Actualizar enlaces pendientes (" + matchingRefreshLinks.length + ")";
-  queueFooterStatus.textContent = needsAttention
-    ? needsLinks.length || resumable.length
-      ? needsLinks.length + " sin enlace · " + resumable.length + " reanudable"
-      : interrupted.length + " interrumpidos"
-    : activeItems.length
-      ? activeItems.length + " en descarga · " + waiting + " en espera"
-      : job.status === "complete"
-        ? total + " archivos completados"
-        : waiting + " en espera";  const firstFilename = String(job.items[0]?.filename || "");
-  const pathParts = firstFilename.split(/[\\/]/).filter(Boolean);
-  queueFormatLabel.textContent = pathParts.length >= 3 ? "Carpeta por clase" : "Archivos sueltos";
+  refreshJobLinksButton.textContent = `Actualizar enlaces pendientes (${matchingRefreshLinks.length})`;
 
   const previousScrollTop = jobItemsBox.scrollTop;
   jobItemsBox.replaceChildren();
@@ -672,31 +642,18 @@ function renderDownloadJob(job) {
     groups.get(folder).push(item);
   }
 
-  let groupIndex = 0;
   for (const [folder, items] of groups) {
-    groupIndex += 1;
     const groupItem = document.createElement("li");
     groupItem.className = "job-class-group";
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "job-class-toggle";
-    toggle.setAttribute("aria-expanded", "true");
-    const chevron = document.createElement("span");
-    chevron.className = "job-class-chevron";
-    chevron.textContent = "⌄";
-    const number = folder.match(/\bCLASE\s+(?:N\s*[°ºo.]?\s*)?(\d{1,3})\b/i)?.[1] || String(groupIndex);
-    const badge = document.createElement("span");
-    badge.className = "class-number";
-    badge.style.setProperty("--class-color", ["#3274d9", "#8b5cc7", "#bd6b24", "#36856e", "#c24d66"][((Number(number) || groupIndex) - 1) % 5]);
-    badge.textContent = number;
+    const heading = document.createElement("div");
+    heading.className = "job-class-heading";
     const folderName = document.createElement("span");
-    folderName.className = "job-class-name";
     folderName.textContent = folder;
     const groupCompleted = items.filter((item) => item.status === "complete").length;
     const groupSummary = document.createElement("span");
     groupSummary.className = "job-class-summary";
-    groupSummary.textContent = groupCompleted + "/" + items.length;
-    toggle.append(chevron, badge, folderName, groupSummary);
+    groupSummary.textContent = `${groupCompleted} / ${items.length}`;
+    heading.append(folderName, groupSummary);
 
     const fileList = document.createElement("ul");
     fileList.className = "job-class-files";
@@ -704,43 +661,32 @@ function renderDownloadJob(job) {
       const listItem = document.createElement("li");
       const row = document.createElement("div");
       row.className = "job-item-row";
-      const icon = document.createElement("span");
-      const type = fileTypeBadge(item.name);
-      icon.className = "file-type " + type.className;
-      icon.textContent = type.label;
       const name = document.createElement("span");
       name.className = "job-item-name";
       name.textContent = item.name;
       const state = document.createElement("span");
-      state.className = "job-item-status job-item-status-" + String(item.status || "pending").replace(/[^a-z-]/g, "");
-      const byteTotal = Number(item.totalBytes);
-      const byteReceived = Number(item.bytesReceived) || 0;
-      const percent = byteTotal > 0 ? " · " + Math.min(100, Math.floor(byteReceived / byteTotal * 100)) + "%" : "";
-      state.textContent = jobItemStatus(item) + (["downloading", "paused"].includes(item.status) ? percent : "");
+      state.className = `job-item-status job-item-status-${item.status || "pending"}`;
+      state.textContent = jobItemStatus(item);
       if (item.pathChanged) state.title = "Edge guardó este archivo en otra carpeta.";
-      row.append(icon, name, state);
+      row.append(name, state);
       listItem.append(row);
 
-      if (["downloading", "paused", "interrupted"].includes(item.status) && byteTotal > 0) {
+      if (["downloading", "paused"].includes(item.status)) {
         const progress = document.createElement("progress");
         progress.className = "job-item-progress";
         progress.max = 1;
-        progress.value = Math.min(1, byteReceived / byteTotal);
+        if (Number(item.totalBytes) > 0) progress.value = Math.min(1, (Number(item.bytesReceived) || 0) / Number(item.totalBytes));
         listItem.append(progress);
       }
       fileList.append(listItem);
     }
-    toggle.addEventListener("click", () => {
-      fileList.hidden = !fileList.hidden;
-      toggle.setAttribute("aria-expanded", String(!fileList.hidden));
-      chevron.textContent = fileList.hidden ? "›" : "⌄";
-    });
-    groupItem.append(toggle, fileList);
+    groupItem.append(heading, fileList);
     jobItemsBox.append(groupItem);
   }
   jobItemsBox.scrollTop = previousScrollTop;
   updateDownloadButton();
 }
+
 function findRefreshableLinks(job) {
   if (normalizeMatch(currentCourseName) !== normalizeMatch(job.courseName)) return [];
   const pending = job.items.filter((item) => item.status === "needs-link");
@@ -988,24 +934,46 @@ function sanitizePathSegment(value) {
 }
 
 function updateOpenClassesButton() {
-  const checkboxes = [...resultsBox.querySelectorAll(".open-class-checkbox")];
+  const checkboxes = [...openClassList.querySelectorAll('input[type="checkbox"]')];
   const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+  openAllClassesCheckbox.checked = checkboxes.length > 0 && selectedCount === checkboxes.length;
+  openAllClassesCheckbox.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
   openClassesButton.disabled = openingClasses || currentTabId === null || selectedCount === 0;
-  openClassesButton.textContent = openingClasses
-    ? "Abriendo clases…"
-    : "Abrir " + selectedCount + (selectedCount === 1 ? " clase" : " clases");
+  openClassesButton.textContent = selectedCount === 1
+    ? "Abrir 1 clase"
+    : selectedCount > 1 ? `Abrir ${selectedCount} clases` : "Abrir clases seleccionadas";
 }
 
-function renderClassOpener(classes, preserveOpenNames = []) {
+function renderClassOpener(classes) {
   currentClassNames = classes.map((classEntry) => classEntry.name);
   classesTabCount.textContent = currentClassNames.length ? String(currentClassNames.length) : "";
   classesTabCount.hidden = currentClassNames.length === 0;
-  const preserved = new Set(preserveOpenNames);
-  for (const checkbox of resultsBox.querySelectorAll(".open-class-checkbox")) {
-    checkbox.checked = preserved.has(currentClassNames[Number(checkbox.dataset.classIndex)]);
-  }
+  openClassCount.textContent = currentClassNames.length ? `${currentClassNames.length} clases` : "";
+  openClassCount.hidden = currentClassNames.length === 0;
+  openClassList.replaceChildren();
+  openClassesStatus.textContent = "";
+  classOpener.hidden = currentClassNames.length === 0;
+  openAllClassesCheckbox.checked = false;
+  openAllClassesCheckbox.indeterminate = false;
+  openAllClassesCheckbox.disabled = currentClassNames.length === 0;
+
+  currentClassNames.forEach((name, index) => {
+    const item = document.createElement("li");
+    const label = document.createElement("label");
+    label.className = "open-class-row";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.dataset.classIndex = String(index);
+    checkbox.addEventListener("change", updateOpenClassesButton);
+    const text = document.createElement("span");
+    text.textContent = name;
+    label.append(checkbox, text);
+    item.append(label);
+    openClassList.append(item);
+  });
   updateOpenClassesButton();
 }
+
 async function expandSelectedBlackboardFolders(requestedNames) {
   const logPrefix = "[DuocClassOpener]";
   const analyticsId = "course.learningModule.tableOfContents.folder.list.folder.item.list-item";
@@ -1141,55 +1109,56 @@ async function expandSelectedBlackboardFolders(requestedNames) {
   return result;
 }
 
-function renderResult(result, { preserveOpenNames = [] } = {}) {
+function renderResult(result) {
   scanWelcome.hidden = true;
   classWorkspace.hidden = false;
   resultsBox.hidden = false;
+  downloadPanel.hidden = true;
   resultsBox.replaceChildren();
-  selectVisibleHost.replaceChildren();
   currentCourseName = result.courseName || result.pageTitle || "Curso";
   courseTitle.textContent = currentCourseName;
-  const classes = Array.isArray(result.classes) ? result.classes : [];
-  const filesWithoutClass = Array.isArray(result.filesWithoutClass) ? result.filesWithoutClass : [];
-  currentClassNames = classes.map((classEntry) => classEntry.name);
-  const fileSelectionRecords = [];
-  currentSelectionRecords = fileSelectionRecords;
-  const groupStates = [];
-  const preserved = new Set(preserveOpenNames);
+  scanButton.textContent = "Detectar de nuevo";
+  renderClassOpener(result.classes || []);
+  const heading = document.createElement("h2");
+  heading.textContent = "Clases y archivos";
+  resultsBox.append(heading);
+  const pageTitle = document.createElement("p");
+  pageTitle.className = "muted";
+  pageTitle.textContent = `Vista actual: ${result.pageTitle}`;
+  resultsBox.append(pageTitle);
 
-  if (!classes.length && !filesWithoutClass.length) {
-    const message = document.createElement("div");
-    message.className = "scan-empty";
-    const heading = document.createElement("h2");
-    heading.textContent = "No encontré clases en esta vista";
-    const detail = document.createElement("p");
-    detail.textContent = "Abre la lista de contenido del curso en Blackboard y vuelve a detectar.";
-    message.append(heading, detail);
+  if (!result.classes.length) {
+    const message = document.createElement("p");
+    message.className = "muted";
+    message.textContent = "No encontré carpetas con nombre «CLASE N°…» en esta vista. Abre la lista de contenido del curso y vuelve a intentar.";
     resultsBox.append(message);
-    scanFooter.hidden = false;
-    downloadPanel.hidden = true;
-    scanStartButton.textContent = "Detectar de nuevo";
-    classesTabCount.hidden = true;
-    openClassesButton.disabled = true;
-    openClassesButton.textContent = "Abrir 0 clases";
-    selectionSummary.textContent = "0 archivos · 0 clases";
-    visibleCount.textContent = "0 visibles";
-    statusBox.textContent = "No se abrió ni modificó nada.";
+    currentSelectionRecords = [];
+    selectionSummary.textContent = "0 archivos seleccionados.";
     updateDownloadButton();
+    statusBox.textContent = "No se abrió ni modificó nada.";
     return;
   }
 
-  scanFooter.hidden = true;
+  const associatedCount = result.classes.reduce((total, item) => total + item.files.length, 0);
+  const classesWithFiles = result.classes.filter((item) => item.files.length).length;
+  const count = document.createElement("p");
+  count.className = "muted";
+  count.textContent = `Encontré ${result.classes.length} clase(s) y ${result.fileCount} nombre(s) de archivo: ${associatedCount} asociado(s) a ${classesWithFiles} clase(s), ${result.filesWithoutClass.length} sin asociación segura.`;
+  resultsBox.append(count);
+
   downloadPanel.hidden = false;
+  const fileSelectionRecords = [];
+  currentSelectionRecords = fileSelectionRecords;
+  const groupStates = [];
   const selectAllRow = document.createElement("label");
-  selectAllRow.className = "select-visible-row";
+  selectAllRow.className = "select-all-row";
   const selectAll = document.createElement("input");
   selectAll.type = "checkbox";
-  selectAll.disabled = (Number(result.fileCount) || 0) === 0;
+  selectAll.disabled = result.fileCount === 0;
   const selectAllText = document.createElement("span");
-  selectAllText.textContent = "Seleccionar visibles";
+  selectAllText.textContent = "Seleccionar todos los archivos visibles";
   selectAllRow.append(selectAll, selectAllText);
-  selectVisibleHost.append(selectAllRow);
+  resultsBox.append(selectAllRow);
 
   const list = document.createElement("ul");
   list.className = "tree";
@@ -1197,78 +1166,67 @@ function renderResult(result, { preserveOpenNames = [] } = {}) {
   function updateSelectionSummary() {
     for (const group of groupStates) {
       const selectedInGroup = group.children.filter((checkbox) => checkbox.checked).length;
-      group.count.textContent = selectedInGroup + "/" + group.children.length;
+      group.checkbox.checked = selectedInGroup > 0 && selectedInGroup === group.children.length;
+      group.checkbox.indeterminate = selectedInGroup > 0 && selectedInGroup < group.children.length;
     }
     const selected = fileSelectionRecords.filter((record) => record.checkbox.checked);
+    const withoutLinkCount = selected.filter((record) => !record.url).length;
     const selectedClasses = new Set(selected
       .filter((record) => record.folder !== "Archivos sin clase identificada")
       .map((record) => record.folder));
-    selectionSummary.textContent = selected.length + " " + (selected.length === 1 ? "archivo" : "archivos") + " · "
-      + selectedClasses.size + " " + (selectedClasses.size === 1 ? "clase" : "clases");
-    visibleCount.textContent = fileSelectionRecords.length + " visibles";
+    selectionSummary.textContent = `${selected.length} archivo(s) seleccionado(s) de ${selectedClasses.size} clase(s), ${fileSelectionRecords.length} visible(s).${withoutLinkCount ? ` ${withoutLinkCount} sin enlace directo.` : ""}`;
     selectAll.checked = fileSelectionRecords.length > 0 && selected.length === fileSelectionRecords.length;
     selectAll.indeterminate = selected.length > 0 && selected.length < fileSelectionRecords.length;
     updateDownloadButton();
   }
 
-  function addGroup(title, files, options = {}) {
-    const folder = options.folder || title;
-    const openable = options.openable !== false;
-    const classIndex = options.classIndex;
+  function addGroup(title, files, { emptyMessage = "", className = "", folder = title } = {}) {
     const item = document.createElement("li");
-    if (options.className) item.className = options.className;
+    if (className) item.className = className;
     const row = document.createElement("div");
     row.className = "tree-row";
+
+    if (!files.length) {
+      const spacer = document.createElement("span");
+      spacer.className = "tree-spacer";
+      spacer.setAttribute("aria-hidden", "true");
+      const label = document.createElement("span");
+      label.className = "tree-label";
+      label.textContent = title;
+      const empty = document.createElement("span");
+      empty.className = "muted tree-empty";
+      empty.textContent = emptyMessage;
+      row.append(spacer, label, empty);
+      item.append(row);
+      list.append(item);
+      return;
+    }
 
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "tree-toggle";
-    toggle.textContent = "⌄";
+    toggle.textContent = "▾";
     toggle.setAttribute("aria-expanded", "true");
-    toggle.setAttribute("aria-label", "Contraer " + title);
-    toggle.disabled = !files.length;
+    toggle.setAttribute("aria-label", `Contraer ${title}`);
 
-    let openCheckbox;
-    if (openable) {
-      openCheckbox = document.createElement("input");
-      openCheckbox.type = "checkbox";
-      openCheckbox.className = "open-class-checkbox";
-      openCheckbox.dataset.classIndex = String(classIndex);
-      openCheckbox.setAttribute("aria-label", "Seleccionar " + title + " para abrir en Blackboard");
-      openCheckbox.checked = preserved.has(title);
-      openCheckbox.addEventListener("change", updateOpenClassesButton);
-    } else {
-      const spacer = document.createElement("span");
-      spacer.className = "tree-spacer";
-      spacer.setAttribute("aria-hidden", "true");
-      row.append(spacer);
-    }
-
-    const numberMatch = title.match(/\bCLASE\s+(?:N\s*[°ºo.]?\s*)?(\d{1,3})\b/i);
-    const number = numberMatch ? numberMatch[1] : String((classIndex ?? classes.length) + 1);
-    const badge = document.createElement("span");
-    badge.className = "class-number";
-    badge.style.setProperty("--class-color", ["#3274d9", "#8b5cc7", "#bd6b24", "#36856e", "#c24d66"][((Number(number) || 1) - 1) % 5]);
-    badge.textContent = openable ? number : "…";
-    const label = document.createElement("span");
-    label.className = "class-title";
-    label.textContent = title;
-    const count = document.createElement("span");
-    count.className = "tree-count";
-    count.textContent = "0/" + files.length;
-    row.append(toggle);
-    if (openCheckbox) row.append(openCheckbox);
-    row.append(badge, label, count);
+    const groupCheckbox = document.createElement("input");
+    groupCheckbox.type = "checkbox";
+    groupCheckbox.setAttribute("aria-label", `Seleccionar todos los archivos de ${title}`);
+    const label = document.createElement("label");
+    label.className = "tree-label";
+    const groupName = document.createElement("span");
+    groupName.textContent = title;
+    label.prepend(groupCheckbox);
+    label.append(groupName);
+    const groupCount = document.createElement("span");
+    groupCount.className = "tree-count";
+    groupCount.textContent = `${files.length}`;
+    label.append(groupCount);
+    row.append(toggle, label);
 
     const children = document.createElement("ul");
     children.className = "tree-children";
     const childCheckboxes = [];
-    if (!files.length) {
-      const empty = document.createElement("li");
-      empty.className = "tree-empty-row";
-      empty.textContent = options.emptyMessage || "sin archivos visibles";
-      children.append(empty);
-    }
     for (const fileEntry of files) {
       const fileName = typeof fileEntry === "string" ? fileEntry : fileEntry.name;
       const fileUrl = typeof fileEntry === "string" ? null : fileEntry.url?.url || null;
@@ -1278,16 +1236,9 @@ function renderResult(result, { preserveOpenNames = [] } = {}) {
       fileRow.className = "tree-file-row";
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
-      checkbox.className = "file-checkbox";
-      checkbox.setAttribute("aria-label", "Seleccionar " + fileName);
       checkbox.addEventListener("change", updateSelectionSummary);
       childCheckboxes.push(checkbox);
       fileSelectionRecords.push({ checkbox, name: fileName, folder, url: fileUrl, mode: fileMode });
-
-      const type = fileTypeBadge(fileName);
-      const icon = document.createElement("span");
-      icon.className = "file-type " + type.className;
-      icon.textContent = type.label;
       const fileLabel = document.createElement("span");
       fileLabel.className = "file-name";
       fileLabel.textContent = fileName;
@@ -1295,34 +1246,35 @@ function renderResult(result, { preserveOpenNames = [] } = {}) {
       linkStatus.className = fileUrl ? "download-status ready" : "download-status missing";
       linkStatus.textContent = fileUrl ? "enlace listo" : "sin enlace";
       linkStatus.title = fileUrl ? "Blackboard expuso un enlace directo para este archivo." : "No encontré un enlace directo seguro en esta vista.";
-      fileRow.append(checkbox, icon, fileLabel, linkStatus);
+      fileRow.append(checkbox, fileLabel, linkStatus);
       fileItem.append(fileRow);
       children.append(fileItem);
     }
+    groupStates.push({ checkbox: groupCheckbox, children: childCheckboxes });
 
-    groupStates.push({ count, children: childCheckboxes });
+    groupCheckbox.addEventListener("change", () => {
+      for (const checkbox of childCheckboxes) checkbox.checked = groupCheckbox.checked;
+      updateSelectionSummary();
+    });
     toggle.addEventListener("click", () => {
       children.hidden = !children.hidden;
-      toggle.textContent = children.hidden ? "›" : "⌄";
+      toggle.textContent = children.hidden ? "▸" : "▾";
       toggle.setAttribute("aria-expanded", String(!children.hidden));
-      toggle.setAttribute("aria-label", (children.hidden ? "Expandir " : "Contraer ") + title);
+      toggle.setAttribute("aria-label", `${children.hidden ? "Expandir" : "Contraer"} ${title}`);
     });
+
     item.append(row, children);
     list.append(item);
+    updateSelectionSummary();
   }
 
-  classes.forEach((classEntry, index) => {
-    addGroup(classEntry.name, Array.isArray(classEntry.files) ? classEntry.files : [], {
-      emptyMessage: "sin archivos visibles",
-      folder: classEntry.name,
-      classIndex: index
-    });
-  });
-  if (filesWithoutClass.length) {
-    addGroup("Archivos sin clase identificada", filesWithoutClass, {
+  for (const classEntry of result.classes) {
+    addGroup(classEntry.name, classEntry.files, { emptyMessage: "sin archivos visibles", folder: classEntry.name });
+  }
+  if (result.filesWithoutClass.length) {
+    addGroup("Archivos sin clase identificada", result.filesWithoutClass, {
       className: "unassigned-group",
-      folder: "Archivos sin clase identificada",
-      openable: false
+      folder: "Archivos sin clase identificada"
     });
   }
   selectAll.addEventListener("change", () => {
@@ -1330,13 +1282,11 @@ function renderResult(result, { preserveOpenNames = [] } = {}) {
     updateSelectionSummary();
   });
   resultsBox.append(list);
-  renderClassOpener(classes, preserveOpenNames);
   updateSelectionSummary();
-
   const readyCount = fileSelectionRecords.filter((record) => record.url).length;
   statusBox.textContent = readyCount
-    ? readyCount + " de " + fileSelectionRecords.length + " archivo(s) tiene(n) enlace directo. Las descargas empiezan al pulsar Descargar."
-    : fileSelectionRecords.length
-      ? "Blackboard mostró los nombres, pero no expuso enlaces directos seguros en esta vista."
-      : "No hay archivos visibles. Selecciona clases y usa Abrir para cargar su contenido.";
+    ? `${readyCount} de ${fileSelectionRecords.length} archivo(s) tiene(n) enlace directo. Las descargas empiezan solo al pulsar el botón.`
+    : result.fileCount
+      ? "Encontré los nombres, pero Blackboard no expuso enlaces directos seguros en esta vista. No habilité la descarga para evitar guardar páginas del visor como archivos."
+      : "No encontré archivos visibles. Abre manualmente una clase y vuelve a detectar.";
 }

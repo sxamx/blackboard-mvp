@@ -6,7 +6,7 @@ El popup separa el trabajo en las vistas **Clases** y **Cola**. La primera conce
 
 ## Qué hace y qué permisos tiene
 
-- Al pulsar **Detectar clases y archivos**, lee los nombres y enlaces ya renderizados por Blackboard, incluidos los metadatos de la fila que usa el menú de tres puntos. Las casillas junto a cada clase permiten expandir varias carpetas en Blackboard y volver a detectar sus archivos. No navega a otros cursos ni pulsa el menú de tres puntos.
+- Al pulsar **Detectar clases y archivos**, lee los nombres y enlaces ya renderizados por Blackboard, incluidos los metadatos de la fila que usa el menú de tres puntos. El menú **Abrir clases** puede expandir las carpetas que selecciones y volver a detectar sus archivos. No navega a otros cursos ni pulsa el menú de tres puntos.
 - Solo devuelve nombres y enlaces al panel de la extensión. Si no encuentra un enlace directo, la casilla puede marcarse, pero el botón queda deshabilitado para ese archivo.
 - No empieza ninguna descarga hasta que pulses el botón de descarga. En formato **Carpeta por clase**, envía todas las solicitudes a Edge sin esperar a que termine el archivo anterior y las guarda en `Descargas/<curso>/<nombre de clase>/<archivo>`; los sin asociación segura van a una subcarpeta `Archivos sin clase identificada` dentro del curso. **Archivos sueltos** guarda los archivos directamente dentro de `Descargas/<curso>/`, sin subcarpetas por clase. En formato ZIP, genera `<curso>.zip` con una carpeta por clase y sus archivos.
 - Si Edge tiene activado **Preguntar dónde guardar cada archivo antes de descargarlo**, puede mostrar una ventana de confirmación por archivo. La extensión deja de esperar a que termine el archivo anterior para enviar las demás solicitudes, pero Edge controla cuándo muestra cada ventana. Desactiva esa opción en `edge://settings/downloads` si quieres que las descargas comiencen sin confirmar cada una.
@@ -31,7 +31,7 @@ Al actualizar la extensión, Edge o Chrome puede pedir que aceptes los permisos 
 2. En Edge abre `edge://extensions`; en Chrome abre `chrome://extensions`.
 3. Activa **Modo de desarrollador**.
 4. Selecciona **Cargar descomprimida** y elige la carpeta `blackboard-mvp`. Si Edge ofrece **Recargar** para la extensión existente, púlsalo y acepta los permisos `downloads` y `storage` si los solicita.
-5. Abre el panel de la extensión y confirma que el encabezado indique la versión `0.12.1`.
+5. Abre el panel de la extensión y confirma que el encabezado indique la versión `0.12.0`.
 
 ## Probar
 
@@ -39,7 +39,7 @@ Al actualizar la extensión, Edge o Chrome puede pedir que aceptes los permisos 
 2. Entra al curso y a la vista donde aparece la lista de carpetas `CLASE N°…`.
 3. Deja abierta la lista de contenido a la izquierda.
 4. Pulsa el icono de la extensión para abrir su panel y después **Detectar clases y archivos**.
-5. Marca las casillas junto a las clases que quieres expandir y pulsa **Abrir N clases**; la extensión vuelve a detectar los archivos visibles. Revisa los nombres y el estado del enlace. Usa las casillas de archivo para descargar elementos concretos o **Seleccionar visibles** para marcar todos los archivos detectados.
+5. En **Abrir clases**, selecciona una o varias carpetas y pulsa el botón **Abrir N clases** para expandirlas en Blackboard; la extensión vuelve a detectar los archivos visibles. Revisa los nombres y la indicación de enlace. Usa la casilla junto a una clase para marcar sus archivos, o marca archivos individualmente. **Seleccionar todos los archivos visibles** marca el inventario que aparece en el popup.
 6. Elige **Carpeta por clase**, **Archivos sueltos** o **ZIP**. Pulsa el botón de descarga y revisa el avance en la pestaña **Cola** o en Descargas del navegador.
 7. Cierra el panel para borrar la selección temporal; vuelve a detectar cuando quieras actualizar la lista.
 

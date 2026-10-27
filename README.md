@@ -6,6 +6,7 @@ Lee nombres de carpetas `CLASE N°…` y archivos que Blackboard ya muestra. Aso
 
 - Al pulsar **Detectar contenido**, lee los nombres y enlaces ya renderizados por Blackboard, incluidos los metadatos de la fila que usa el menú de tres puntos. La sección **Clases** puede expandir las carpetas que selecciones y volver a detectar sus archivos. No navega a otros cursos ni pulsa el menú de tres puntos.
 - El panel separa el flujo en **Clases**, **Archivos** y **Descargas**. El buscador filtra clases y archivos por nombre; al filtrar se conserva la selección que ya hiciste.
+- La apariencia gris cambia automáticamente entre claro y oscuro según la preferencia del sistema.
 - Solo devuelve nombres y enlaces al panel de la extensión. Si no encuentra un enlace directo, la casilla puede marcarse, pero el botón queda deshabilitado para ese archivo.
 - No empieza ninguna descarga hasta que pulses el botón de descarga. En formato carpeta, envía todas las solicitudes a Edge sin esperar a que termine el archivo anterior y las guarda en `Descargas/<curso>/<nombre de clase>/<archivo>`; los sin asociación segura van a una subcarpeta `Archivos sin clase identificada` dentro del curso. En formato ZIP, genera `<curso>.zip` con una carpeta por clase y sus archivos.
 - Si Edge tiene activado **Preguntar dónde guardar cada archivo antes de descargarlo**, puede mostrar una ventana de confirmación por archivo. La extensión deja de esperar a que termine el archivo anterior para enviar las demás solicitudes, pero Edge controla cuándo muestra cada ventana. Desactiva esa opción en `edge://settings/downloads` si quieres que las descargas comiencen sin confirmar cada una.
@@ -30,7 +31,7 @@ Al actualizar la extensión, Edge o Chrome puede pedir que aceptes los permisos 
 2. En Edge abre `edge://extensions`; en Chrome abre `chrome://extensions`.
 3. Activa **Modo de desarrollador**.
 4. Selecciona **Cargar descomprimida** y elige la carpeta `blackboard-mvp`. Si Edge ofrece **Recargar** para la extensión existente, púlsalo y acepta los permisos `downloads` y `storage` si los solicita.
-5. Abre el panel de la extensión y confirma que abajo indique la versión `0.11.3`.
+5. Abre el panel de la extensión y confirma que abajo indique la versión `0.11.4`.
 
 ## Probar
 

@@ -7,6 +7,16 @@ const openClassesStatus = document.getElementById("open-classes-status");
 const resultsBox = document.getElementById("results");
 const statusBox = document.getElementById("status");
 const selectionSummary = document.getElementById("selection-summary");
+const contentSearch = document.getElementById("content-search");
+const searchSummary = document.getElementById("search-summary");
+const searchControls = document.getElementById("search-controls");
+const classesEmpty = document.getElementById("classes-empty");
+const classSearchEmpty = document.getElementById("class-search-empty");
+const classCountBadge = document.getElementById("class-count-badge");
+const fileCountBadge = document.getElementById("file-count-badge");
+const downloadCountBadge = document.getElementById("download-count-badge");
+const downloadsEmpty = document.getElementById("downloads-empty");
+const sectionTabs = [...document.querySelectorAll(".section-tab")];
 const downloadButton = document.getElementById("download-selected");
 const downloadFormat = document.getElementById("download-format");
 const downloadJobPanel = document.getElementById("download-job");
@@ -27,10 +37,121 @@ let downloadInProgress = false;
 let latestDownloadJob = null;
 let matchingRefreshLinks = [];
 let currentClassNames = [];
+let currentClassItems = [];
+let currentFileGroups = [];
+let currentSelectionUpdater = () => {};
+let searchingGroups = false;
+let hasScannedInventory = false;
 let openingClasses = false;
+
+function activateSection(sectionName, focusTab = false) {
+  for (const tab of sectionTabs) {
+    const selected = tab.dataset.section === sectionName;
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+    if (selected && focusTab) tab.focus();
+  }
+  for (const panel of document.querySelectorAll(".section-panel")) {
+    panel.hidden = panel.id !== `section-${sectionName}`;
+  }
+  searchControls.hidden = sectionName === "downloads";
+}
+
+for (const [index, tab] of sectionTabs.entries()) {
+  tab.addEventListener("click", () => activateSection(tab.dataset.section));
+  tab.addEventListener("keydown", (event) => {
+    let nextIndex = index;
+    if (event.key === "ArrowRight") nextIndex = (index + 1) % sectionTabs.length;
+    else if (event.key === "ArrowLeft") nextIndex = (index + sectionTabs.length - 1) % sectionTabs.length;
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = sectionTabs.length - 1;
+    else return;
+    event.preventDefault();
+    activateSection(sectionTabs[nextIndex].dataset.section, true);
+  });
+}
+
+contentSearch.addEventListener("input", () => {
+  applyContentSearch();
+  currentSelectionUpdater();
+});
 
 function selectedFileRecords() {
   return currentSelectionRecords.filter((record) => record.checkbox.checked);
+}
+
+function normalizeSearchText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLocaleLowerCase();
+}
+
+function applyContentSearch() {
+  const query = normalizeSearchText(contentSearch.value);
+  const searching = Boolean(query);
+
+  if (searching && !searchingGroups) {
+    for (const group of currentFileGroups) {
+      if (group.children) group.preSearchChildrenHidden = group.children.hidden;
+    }
+  }
+
+  let matchingClasses = 0;
+  for (const classItem of currentClassItems) {
+    const matches = !searching || normalizeSearchText(classItem.name).includes(query);
+    classItem.element.hidden = !matches;
+    if (matches) matchingClasses += 1;
+  }
+
+  let matchingFiles = 0;
+  for (const group of currentFileGroups) {
+    const titleMatches = !searching || normalizeSearchText(group.title).includes(query);
+    let matchingGroupFiles = 0;
+    for (const record of group.childRecords) {
+      const matches = !searching || titleMatches || normalizeSearchText(record.name).includes(query);
+      record.element.hidden = !matches;
+      if (matches) matchingGroupFiles += 1;
+    }
+    matchingFiles += matchingGroupFiles;
+    group.item.hidden = searching && !titleMatches && matchingGroupFiles === 0;
+
+    if (searching && !group.item.hidden && group.children) {
+      group.children.hidden = false;
+      group.toggle.textContent = "▾";
+      group.toggle.setAttribute("aria-expanded", "true");
+      group.toggle.setAttribute("aria-label", `Contraer ${group.title}`);
+    }
+  }
+
+  if (!searching && searchingGroups) {
+    for (const group of currentFileGroups) {
+      if (!group.children) continue;
+      group.children.hidden = group.preSearchChildrenHidden;
+      group.toggle.textContent = group.children.hidden ? "▸" : "▾";
+      group.toggle.setAttribute("aria-expanded", String(!group.children.hidden));
+      group.toggle.setAttribute("aria-label", `${group.children.hidden ? "Expandir" : "Contraer"} ${group.title}`);
+    }
+  }
+  searchingGroups = searching;
+
+  classSearchEmpty.hidden = !searching || matchingClasses > 0;
+  if (!hasScannedInventory && !currentClassNames.length && !currentSelectionRecords.length) {
+    searchSummary.textContent = "Detecta el contenido para buscar clases y archivos.";
+  } else if (!searching && !currentClassNames.length && !currentSelectionRecords.length) {
+    searchSummary.textContent = "No hay clases ni archivos detectados en esta vista.";
+  } else if (!searching) {
+    searchSummary.textContent = "Busca por nombre de clase o archivo.";
+  } else if (matchingClasses || matchingFiles) {
+    searchSummary.textContent = `Coincidencias: ${matchingClasses} clase(s) y ${matchingFiles} archivo(s).`;
+  } else {
+    searchSummary.textContent = "No encontré clases ni archivos con ese nombre.";
+  }
+}
+
+function recordMatchesCurrentFilter(record) {
+  return !record.element.hidden && !record.group.item.hidden;
 }
 
 function updateDownloadButton() {
@@ -38,6 +159,11 @@ function updateDownloadButton() {
   downloadButton.textContent = downloadFormat.value === "zip" ? "Crear y descargar ZIP" : "Descargar seleccionados";
   const folderJobActive = downloadFormat.value === "folder" && latestDownloadJob && latestDownloadJob.status !== "complete";
   downloadButton.disabled = downloadInProgress || Boolean(folderJobActive) || selected.length === 0 || selected.some((record) => !record.url);
+  if (!latestDownloadJob) {
+    downloadsEmpty.textContent = selected.length
+      ? `Tienes ${selected.length} archivo(s) seleccionado(s). Elige el formato y pulsa descargar.`
+      : "Selecciona archivos en la sección Archivos para iniciar una descarga.";
+  }
 }
 
 downloadFormat.addEventListener("change", updateDownloadButton);
@@ -378,10 +504,24 @@ async function getActiveBlackboardTab() {
 }
 
 scanButton.addEventListener("click", async () => {
+  activateSection("classes");
+  hasScannedInventory = false;
   statusBox.textContent = "Leyendo nombres ya cargados en la pestaña…";
   classOpener.hidden = true;
+  classesEmpty.hidden = false;
+  classesEmpty.textContent = "Detectando contenido del curso…";
   resultsBox.replaceChildren();
   currentSelectionRecords = [];
+  currentClassNames = [];
+  currentClassItems = [];
+  currentFileGroups = [];
+  currentSelectionUpdater = () => {};
+  searchingGroups = false;
+  contentSearch.value = "";
+  classCountBadge.hidden = true;
+  fileCountBadge.hidden = true;
+  classSearchEmpty.hidden = true;
+  applyContentSearch();
   selectionSummary.textContent = "0 archivos seleccionados.";
   updateDownloadButton();
   scanButton.disabled = true;
@@ -397,14 +537,20 @@ scanButton.addEventListener("click", async () => {
     renderResult(result?.result || { pageTitle: "Título no visible", courseName: "Curso", classes: [], filesWithoutClass: [], fileCount: 0 });
     void refreshDownloadJob();
   } catch (error) {
+    hasScannedInventory = true;
     resultsBox.replaceChildren();
     const message = document.createElement("p");
     message.className = "muted";
     message.textContent = error.message || "No pude leer esta página.";
     resultsBox.append(message);
     classOpener.hidden = true;
+    classesEmpty.hidden = false;
+    classesEmpty.textContent = "No pude detectar contenido. Confirma que estás en Blackboard y vuelve a intentarlo.";
     currentSelectionRecords = [];
+    currentClassItems = [];
+    currentFileGroups = [];
     selectionSummary.textContent = "0 archivos seleccionados.";
+    applyContentSearch();
     updateDownloadButton();
     statusBox.textContent = "No se modificó el curso.";
     void refreshDownloadJob();
@@ -480,6 +626,8 @@ function renderDownloadJob(job) {
   matchingRefreshLinks = job ? findRefreshableLinks(job) : [];
   if (!job) {
     downloadJobPanel.hidden = true;
+    downloadsEmpty.hidden = false;
+    downloadCountBadge.hidden = true;
     jobStatusBadge.textContent = "";
     jobProgress.value = 0;
     updateDownloadButton();
@@ -487,8 +635,11 @@ function renderDownloadJob(job) {
   }
 
   downloadJobPanel.hidden = false;
+  downloadsEmpty.hidden = true;
   const total = job.items.length;
   const completed = job.items.filter((item) => item.status === "complete").length;
+  downloadCountBadge.textContent = `${completed}/${total}`;
+  downloadCountBadge.hidden = false;
   const activeItems = job.items.filter((item) => item.status === "downloading" || item.status === "starting");
   const active = activeItems.find((item) => item.status === "downloading") || activeItems[0];
   const resumable = job.items.filter((item) => item.canResume && ["paused", "interrupted"].includes(item.status));
@@ -820,15 +971,19 @@ function updateOpenClassesButton() {
 
 function renderClassOpener(classes) {
   currentClassNames = classes.map((classEntry) => classEntry.name);
+  currentClassItems = [];
   openClassList.replaceChildren();
   openClassesStatus.textContent = "";
   classOpener.hidden = currentClassNames.length === 0;
+  classesEmpty.hidden = currentClassNames.length > 0;
+  if (!currentClassNames.length) classesEmpty.textContent = "No encontré carpetas de clase en esta vista. Abre el contenido del curso y vuelve a detectar.";
   openAllClassesCheckbox.checked = false;
   openAllClassesCheckbox.indeterminate = false;
   openAllClassesCheckbox.disabled = currentClassNames.length === 0;
 
   currentClassNames.forEach((name, index) => {
     const item = document.createElement("li");
+    currentClassItems.push({ element: item, name });
     const label = document.createElement("label");
     label.className = "open-class-row";
     const checkbox = document.createElement("input");
@@ -842,6 +997,7 @@ function renderClassOpener(classes) {
     openClassList.append(item);
   });
   updateOpenClassesButton();
+  applyContentSearch();
 }
 
 async function expandSelectedBlackboardFolders(requestedNames) {
@@ -980,9 +1136,14 @@ async function expandSelectedBlackboardFolders(requestedNames) {
 }
 
 function renderResult(result) {
+  hasScannedInventory = true;
   resultsBox.replaceChildren();
   currentCourseName = result.courseName || result.pageTitle || "Curso";
   renderClassOpener(result.classes || []);
+  classCountBadge.textContent = String(result.classes.length);
+  classCountBadge.hidden = result.classes.length === 0;
+  fileCountBadge.textContent = String(result.fileCount || 0);
+  fileCountBadge.hidden = !result.fileCount;
   const pageTitle = document.createElement("p");
   pageTitle.className = "summary";
   pageTitle.textContent = `Vista actual: ${result.pageTitle}`;
@@ -994,6 +1155,9 @@ function renderResult(result) {
     message.textContent = "No encontré carpetas con nombre «CLASE N°…» en esta vista. Abre la lista de contenido del curso y vuelve a intentar.";
     resultsBox.append(message);
     currentSelectionRecords = [];
+    currentFileGroups = [];
+    currentSelectionUpdater = () => {};
+    applyContentSearch();
     selectionSummary.textContent = "0 archivos seleccionados.";
     updateDownloadButton();
     statusBox.textContent = "No se abrió ni modificó nada.";
@@ -1010,13 +1174,14 @@ function renderResult(result) {
   const fileSelectionRecords = [];
   currentSelectionRecords = fileSelectionRecords;
   const groupStates = [];
+  currentFileGroups = groupStates;
   const selectAllRow = document.createElement("label");
   selectAllRow.className = "select-all-row";
   const selectAll = document.createElement("input");
   selectAll.type = "checkbox";
   selectAll.disabled = result.fileCount === 0;
   const selectAllText = document.createElement("span");
-  selectAllText.textContent = "Seleccionar todos los archivos visibles";
+  selectAllText.textContent = "Seleccionar todos los resultados";
   selectAllRow.append(selectAll, selectAllText);
   resultsBox.append(selectAllRow);
 
@@ -1025,24 +1190,41 @@ function renderResult(result) {
 
   function updateSelectionSummary() {
     for (const group of groupStates) {
-      const selectedInGroup = group.children.filter((checkbox) => checkbox.checked).length;
-      group.checkbox.checked = selectedInGroup > 0 && selectedInGroup === group.children.length;
-      group.checkbox.indeterminate = selectedInGroup > 0 && selectedInGroup < group.children.length;
+      if (!group.checkbox) continue;
+      const groupRecords = normalizeSearchText(contentSearch.value)
+        ? group.childRecords.filter(recordMatchesCurrentFilter)
+        : group.childRecords;
+      const selectedInGroup = groupRecords.filter((record) => record.checkbox.checked).length;
+      group.checkbox.checked = groupRecords.length > 0 && selectedInGroup === groupRecords.length;
+      group.checkbox.indeterminate = selectedInGroup > 0 && selectedInGroup < groupRecords.length;
     }
     const selected = fileSelectionRecords.filter((record) => record.checkbox.checked);
     const withoutLinkCount = selected.filter((record) => !record.url).length;
     const selectedClasses = new Set(selected
       .filter((record) => record.folder !== "Archivos sin clase identificada")
       .map((record) => record.folder));
-    selectionSummary.textContent = `${selected.length} archivo(s) seleccionado(s) de ${selectedClasses.size} clase(s), ${fileSelectionRecords.length} visible(s).${withoutLinkCount ? ` ${withoutLinkCount} sin enlace directo.` : ""}`;
-    selectAll.checked = fileSelectionRecords.length > 0 && selected.length === fileSelectionRecords.length;
-    selectAll.indeterminate = selected.length > 0 && selected.length < fileSelectionRecords.length;
+    selectionSummary.textContent = `${selected.length} archivo(s) seleccionado(s) de ${selectedClasses.size} clase(s).${withoutLinkCount ? ` ${withoutLinkCount} sin enlace directo.` : ""}`;
+    const filteredRecords = fileSelectionRecords.filter(recordMatchesCurrentFilter);
+    const selectedFilteredRecords = filteredRecords.filter((record) => record.checkbox.checked);
+    selectAll.disabled = filteredRecords.length === 0;
+    selectAll.checked = filteredRecords.length > 0 && selectedFilteredRecords.length === filteredRecords.length;
+    selectAll.indeterminate = selectedFilteredRecords.length > 0 && selectedFilteredRecords.length < filteredRecords.length;
     updateDownloadButton();
   }
 
   function addGroup(title, files, { emptyMessage = "", className = "", folder = title } = {}) {
     const item = document.createElement("li");
     if (className) item.className = className;
+    const group = {
+      item,
+      title,
+      checkbox: null,
+      toggle: null,
+      children: null,
+      childRecords: [],
+      preSearchChildrenHidden: false
+    };
+    groupStates.push(group);
     const row = document.createElement("div");
     row.className = "tree-row";
 
@@ -1065,12 +1247,14 @@ function renderResult(result) {
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "tree-toggle";
+    group.toggle = toggle;
     toggle.textContent = "▾";
     toggle.setAttribute("aria-expanded", "true");
     toggle.setAttribute("aria-label", `Contraer ${title}`);
 
     const groupCheckbox = document.createElement("input");
     groupCheckbox.type = "checkbox";
+    group.checkbox = groupCheckbox;
     groupCheckbox.setAttribute("aria-label", `Seleccionar todos los archivos de ${title}`);
     const label = document.createElement("label");
     label.className = "tree-label";
@@ -1086,7 +1270,7 @@ function renderResult(result) {
 
     const children = document.createElement("ul");
     children.className = "tree-children";
-    const childCheckboxes = [];
+    group.children = children;
     for (const fileEntry of files) {
       const fileName = typeof fileEntry === "string" ? fileEntry : fileEntry.name;
       const fileUrl = typeof fileEntry === "string" ? null : fileEntry.url?.url || null;
@@ -1097,8 +1281,9 @@ function renderResult(result) {
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
       checkbox.addEventListener("change", updateSelectionSummary);
-      childCheckboxes.push(checkbox);
-      fileSelectionRecords.push({ checkbox, name: fileName, folder, url: fileUrl, mode: fileMode });
+      const fileRecord = { checkbox, name: fileName, folder, url: fileUrl, mode: fileMode, element: fileItem, group };
+      group.childRecords.push(fileRecord);
+      fileSelectionRecords.push(fileRecord);
       const fileLabel = document.createElement("span");
       fileLabel.className = "file-name";
       fileLabel.textContent = fileName;
@@ -1110,10 +1295,12 @@ function renderResult(result) {
       fileItem.append(fileRow);
       children.append(fileItem);
     }
-    groupStates.push({ checkbox: groupCheckbox, children: childCheckboxes });
 
     groupCheckbox.addEventListener("change", () => {
-      for (const checkbox of childCheckboxes) checkbox.checked = groupCheckbox.checked;
+      const groupRecords = normalizeSearchText(contentSearch.value)
+        ? group.childRecords.filter(recordMatchesCurrentFilter)
+        : group.childRecords;
+      for (const record of groupRecords) record.checkbox.checked = groupCheckbox.checked;
       updateSelectionSummary();
     });
     toggle.addEventListener("click", () => {
@@ -1138,10 +1325,12 @@ function renderResult(result) {
     });
   }
   selectAll.addEventListener("change", () => {
-    for (const record of fileSelectionRecords) record.checkbox.checked = selectAll.checked;
+    for (const record of fileSelectionRecords.filter(recordMatchesCurrentFilter)) record.checkbox.checked = selectAll.checked;
     updateSelectionSummary();
   });
   resultsBox.append(list);
+  currentSelectionUpdater = updateSelectionSummary;
+  applyContentSearch();
   updateSelectionSummary();
   const readyCount = fileSelectionRecords.filter((record) => record.url).length;
   statusBox.textContent = readyCount

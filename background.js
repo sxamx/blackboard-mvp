@@ -1,6 +1,6 @@
 const JOB_STORAGE_KEY = "folderDownloadJob";
 const SESSION_URLS_KEY = "folderDownloadSessionUrls";
-const pendingDownloadPaths = new Map();
+const SESSION_FILENAME_PATHS_KEY = "folderDownloadFilenamePaths";
 const startingItems = new Set();
 const startingItemUrls = new Map();
 const jobMutationTails = new Map();
@@ -13,20 +13,31 @@ if (chrome.storage.session?.setAccessLevel) {
 }
 
 chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
-  const key = normalizeDownloadKey(downloadItem.url);
-  const queue = pendingDownloadPaths.get(key);
-  let filename = "";
-  if (belongsToThisExtension(downloadItem) && queue?.length) {
-    filename = queue.shift();
-    if (!queue.length) pendingDownloadPaths.delete(key);
-  }
-  if (filename) {
-    suggest({ filename, conflictAction: "uniquify" });
+  if (!belongsToThisExtension(downloadItem)) {
+    suggest();
     return;
   }
-  suggest();
+
+  void takePendingFilename(downloadItem.url).then((pending) => {
+    if (pending) suggest({ filename: pending.filename, conflictAction: "uniquify" });
+    else suggest();
+  }).catch(() => suggest());
+  return true;
 });
 
+async function takePendingFilename(downloadUrl) {
+  const urlKey = normalizeDownloadKey(downloadUrl);
+  return withJobMutationLock(null, async () => {
+    const stored = await chrome.storage.session.get(SESSION_FILENAME_PATHS_KEY);
+    const paths = stored[SESSION_FILENAME_PATHS_KEY] || [];
+    const index = paths.findIndex((entry) => normalizeDownloadKey(entry.url) === urlKey);
+    if (index < 0) return null;
+
+    const [pending] = paths.splice(index, 1);
+    await chrome.storage.session.set({ [SESSION_FILENAME_PATHS_KEY]: paths });
+    return pending;
+  });
+}
 chrome.downloads.onChanged.addListener((delta) => {
   void handleDownloadChanged(delta).catch(() => {});
 });
@@ -93,18 +104,18 @@ async function startFolderJob(message) {
     if (previous && previous.status !== "complete") {
       throw new Error("Hay una cola pendiente. Reanúdala o actualiza sus enlaces antes de iniciar otra.");
     }
-    await chrome.storage.session.set({ [SESSION_URLS_KEY]: urls });
+    const filenamePaths = items.map((item) => ({ itemId: item.id, url: urls[item.id], filename: item.filename }));
+    await chrome.storage.session.set({
+      [SESSION_URLS_KEY]: urls,
+      [SESSION_FILENAME_PATHS_KEY]: filenamePaths
+    });
     for (const item of items) {
       const url = urls[item.id];
-      const key = normalizeDownloadKey(url);
-      const queue = pendingDownloadPaths.get(key) || [];
-      queue.push(item.filename);
-      pendingDownloadPaths.set(key, queue);
       item.status = "starting";
       item.startRequestedAt = Date.now();
       startingItems.add(item.id);
       startingItemUrls.set(item.id, url);
-      tasks.push({ itemId: item.id, url, filename: item.filename, key });
+      tasks.push({ itemId: item.id, url, filename: item.filename });
     }
     await saveJob(job);
   });
@@ -127,9 +138,9 @@ async function startDownloadForItem(jobId, task) {
       saveAs: false
     });
   } catch {
-    removePendingDownloadPath(task.key, task.filename);
+    await removeSessionUrlUnlocked(task.itemId);
+    await removePendingFilenamePathUnlocked(task.itemId);
     await mutateJob(jobId, async (job) => {
-      await removeSessionUrlUnlocked(task.itemId);
       const item = job.items.find((candidate) => candidate.id === task.itemId);
       if (!item) return false;
       item.status = "needs-link";
@@ -143,7 +154,6 @@ async function startDownloadForItem(jobId, task) {
     return;
   }
 
-  removePendingDownloadPath(task.key, task.filename);
   let download = null;
   try {
     [download] = await chrome.downloads.search({ id: downloadId });
@@ -169,25 +179,27 @@ async function startReadyItems(jobId) {
   const tasks = await withJobMutationLock(jobId, async () => {
     const job = await readJob();
     if (!job || job.id !== jobId) return [];
-    const stored = await chrome.storage.session.get(SESSION_URLS_KEY);
+    const stored = await chrome.storage.session.get([SESSION_URLS_KEY, SESSION_FILENAME_PATHS_KEY]);
     const urls = stored[SESSION_URLS_KEY] || {};
+    const filenamePaths = stored[SESSION_FILENAME_PATHS_KEY] || [];
     const ready = job.items.filter((item) => item.status === "pending" && urls[item.id]);
     if (!ready.length) return [];
 
     const nextTasks = [];
     for (const item of ready) {
       const url = urls[item.id];
-      const key = normalizeDownloadKey(url);
-      const queue = pendingDownloadPaths.get(key) || [];
-      queue.push(item.filename);
-      pendingDownloadPaths.set(key, queue);
+      for (let index = filenamePaths.length - 1; index >= 0; index -= 1) {
+        if (filenamePaths[index].itemId === item.id) filenamePaths.splice(index, 1);
+      }
       item.status = "starting";
       item.startRequestedAt = Date.now();
       item.error = "";
       startingItems.add(item.id);
       startingItemUrls.set(item.id, url);
-      nextTasks.push({ itemId: item.id, url, filename: item.filename, key });
+      filenamePaths.push({ itemId: item.id, url, filename: item.filename });
+      nextTasks.push({ itemId: item.id, url, filename: item.filename });
     }
+    await chrome.storage.session.set({ [SESSION_FILENAME_PATHS_KEY]: filenamePaths });
     await saveJob(job);
     return nextTasks;
   });
@@ -211,11 +223,22 @@ async function removeSessionUrlUnlocked(itemId) {
   } catch {}
 }
 
+async function removePendingFilenamePathUnlocked(itemId) {
+  try {
+    const stored = await chrome.storage.session.get(SESSION_FILENAME_PATHS_KEY);
+    const paths = stored[SESSION_FILENAME_PATHS_KEY] || [];
+    const remaining = paths.filter((entry) => entry.itemId !== itemId);
+    if (remaining.length !== paths.length) {
+      await chrome.storage.session.set({ [SESSION_FILENAME_PATHS_KEY]: remaining });
+    }
+  } catch {}
+}
+
 async function clearFolderJob() {
   return withJobMutationLock(null, async () => {
     const job = await readJob();
     if (!job) {
-      await chrome.storage.session.remove(SESSION_URLS_KEY);
+      await chrome.storage.session.remove([SESSION_URLS_KEY, SESSION_FILENAME_PATHS_KEY]);
       return { ok: true, cancelled: 0, waitingForSave: 0, job: null };
     }
 
@@ -236,8 +259,6 @@ async function clearFolderJob() {
         }
       }
 
-      const url = urls[item.id] || startingItemUrls.get(item.id);
-      if (url) removePendingDownloadPath(normalizeDownloadKey(url), item.filename);
       startingItems.delete(item.id);
       startingItemUrls.delete(item.id);
     }
@@ -247,7 +268,7 @@ async function clearFolderJob() {
       if (await cancelDownloadIfActive(id)) cancelled += 1;
     }
 
-    await chrome.storage.session.remove(SESSION_URLS_KEY);
+    await chrome.storage.session.remove([SESSION_URLS_KEY, SESSION_FILENAME_PATHS_KEY]);
     await chrome.storage.local.remove(JOB_STORAGE_KEY);
     try {
       await chrome.runtime.sendMessage({ type: "folder-download-job-updated", job: null });
@@ -590,14 +611,6 @@ function normalizeDownloadKey(url) {
 
 function belongsToThisExtension(downloadItem) {
   return !downloadItem.byExtensionId || downloadItem.byExtensionId === chrome.runtime.id;
-}
-
-function removePendingDownloadPath(key, filename) {
-  const queue = pendingDownloadPaths.get(key);
-  if (!queue) return;
-  const index = queue.indexOf(filename);
-  if (index >= 0) queue.splice(index, 1);
-  if (!queue.length) pendingDownloadPaths.delete(key);
 }
 
 function downloadPathMatches(absolutePath, expectedRelativePath) {

@@ -10,7 +10,7 @@ Lee nombres de carpetas `CLASE N°…` y archivos que Blackboard ya muestra. Aso
 - Si Edge tiene activado **Preguntar dónde guardar cada archivo antes de descargarlo**, puede mostrar una ventana de confirmación por archivo. La extensión deja de esperar a que termine el archivo anterior para enviar las demás solicitudes, pero Edge controla cuándo muestra cada ventana. Desactiva esa opción en `edge://settings/downloads` si quieres que las descargas comiencen sin confirmar cada una.
 - En formato carpeta, el navegador sigue mostrando una entrada individual por cada archivo. Para ver la estructura física, usa **Mostrar en carpeta** desde la lista de descargas.
 - El formato ZIP admite hasta 100 MB de contenido y solo procesa enlaces del mismo sitio de Blackboard; el ZIP final puede ser algo mayor por sus índices. No comprime el contenido y arma el archivo en memoria, por lo que puede usar bastante más memoria que el tamaño final. Para selecciones mayores, o si Edge se queda sin memoria, usa el formato carpeta.
-- En formato carpeta, el service worker de la extensión fija la ruta cuando el navegador determina el nombre final y revisa la ruta reportada. Si otro gestor de descargas la cambia, el panel lo indicará.
+- En formato carpeta, la extensión conserva la ruta prevista en el almacenamiento de sesión hasta que Edge determina el nombre final, incluso si se reinicia el service worker. Luego revisa la ruta reportada y marca “ruta cambiada” en la cola si Edge guardó el archivo fuera de la carpeta prevista.
 - El botón **Cancelar y eliminar cola** detiene las descargas que Edge todavía tiene activas y borra el progreso guardado. Conserva los archivos completados. Si Edge dejó una ventana de Guardar pendiente, ciérrala manualmente.
 - La selección del panel se borra al cerrarlo. Para formato carpeta, la extensión guarda localmente el curso, nombres, rutas, estado y los identificadores de descarga; no guarda el contenido ni persiste los enlaces privados. Los enlaces de archivos pendientes se mantienen solo en el almacenamiento de sesión y se descartan al cerrar Edge o actualizar la extensión. Edge conserva el historial normal de las descargas iniciadas. La extensión no envía datos ni enlaces a servidores de terceros; las peticiones de descarga van a Blackboard.
 - Solicita `activeTab`, `scripting`, `downloads` y `storage`: los dos primeros leen la pestaña tras pulsar detectar; `downloads` inicia y consulta el estado; `storage` conserva localmente el progreso de la cola.
@@ -29,7 +29,7 @@ Al actualizar la extensión, Edge o Chrome puede pedir que aceptes los permisos 
 2. En Edge abre `edge://extensions`; en Chrome abre `chrome://extensions`.
 3. Activa **Modo de desarrollador**.
 4. Selecciona **Cargar descomprimida** y elige la carpeta `blackboard-mvp`. Si Edge ofrece **Recargar** para la extensión existente, púlsalo y acepta los permisos `downloads` y `storage` si los solicita.
-5. Abre el panel de la extensión y confirma que abajo indique la versión `0.11.0`.
+5. Abre el panel de la extensión y confirma que abajo indique la versión `0.11.1`.
 
 ## Probar
 

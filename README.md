@@ -4,7 +4,7 @@ Lee nombres de carpetas `CLASE N°…` y archivos que Blackboard ya muestra. Aso
 
 ## Qué hace y qué permisos tiene
 
-- Al pulsar **Detectar contenido de Blackboard**, lee los nombres y enlaces ya renderizados por Blackboard, incluidos los metadatos de la fila que usa el menú de tres puntos. La sección **Clases** puede expandir las carpetas que selecciones y volver a detectar sus archivos. No navega a otros cursos ni pulsa el menú de tres puntos.
+- Al pulsar **Detectar contenido**, lee los nombres y enlaces ya renderizados por Blackboard, incluidos los metadatos de la fila que usa el menú de tres puntos. La sección **Clases** puede expandir las carpetas que selecciones y volver a detectar sus archivos. No navega a otros cursos ni pulsa el menú de tres puntos.
 - El panel separa el flujo en **Clases**, **Archivos** y **Descargas**. El buscador filtra clases y archivos por nombre; al filtrar se conserva la selección que ya hiciste.
 - Solo devuelve nombres y enlaces al panel de la extensión. Si no encuentra un enlace directo, la casilla puede marcarse, pero el botón queda deshabilitado para ese archivo.
 - No empieza ninguna descarga hasta que pulses el botón de descarga. En formato carpeta, envía todas las solicitudes a Edge sin esperar a que termine el archivo anterior y las guarda en `Descargas/<curso>/<nombre de clase>/<archivo>`; los sin asociación segura van a una subcarpeta `Archivos sin clase identificada` dentro del curso. En formato ZIP, genera `<curso>.zip` con una carpeta por clase y sus archivos.
@@ -30,14 +30,14 @@ Al actualizar la extensión, Edge o Chrome puede pedir que aceptes los permisos 
 2. En Edge abre `edge://extensions`; en Chrome abre `chrome://extensions`.
 3. Activa **Modo de desarrollador**.
 4. Selecciona **Cargar descomprimida** y elige la carpeta `blackboard-mvp`. Si Edge ofrece **Recargar** para la extensión existente, púlsalo y acepta los permisos `downloads` y `storage` si los solicita.
-5. Abre el panel de la extensión y confirma que abajo indique la versión `0.11.2`.
+5. Abre el panel de la extensión y confirma que abajo indique la versión `0.11.3`.
 
 ## Probar
 
 1. Abre Blackboard de Duoc con tu flujo normal de inicio de sesión.
 2. Entra al curso y a la vista donde aparece la lista de carpetas `CLASE N°…`.
 3. Deja abierta la lista de contenido a la izquierda.
-4. Pulsa el icono de la extensión para abrir su panel y después **Detectar contenido de Blackboard**.
+4. Pulsa el icono de la extensión para abrir su panel y después **Detectar contenido**.
 5. En **Clases**, selecciona una o varias carpetas y pulsa **Abrir clases seleccionadas** para expandirlas en Blackboard; la extensión vuelve a detectar los archivos visibles.
 6. Usa el buscador para filtrar por clase o nombre de archivo. En **Archivos**, marca una clase completa o selecciona archivos individuales; la selección se mantiene al cambiar de sección o filtrar.
 7. En **Descargas**, elige **Carpeta del curso con subcarpetas por clase** o **Un ZIP con subcarpetas por clase**. Pulsa el botón de descarga y revisa el avance de la cola.

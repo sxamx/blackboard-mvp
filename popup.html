@@ -11,37 +11,31 @@
       <header class="app-header">
         <div class="brand-mark" aria-hidden="true">DUOC</div>
         <div class="header-copy">
-          <div class="eyebrow">BLACKBOARD · MATERIA DEL CURSO</div>
           <h1>Material de clases</h1>
         </div>
       </header>
-      <p class="intro">Detecta el material, elige clases o archivos y descarga todo ordenado.</p>
 
-      <button id="scan" class="primary" type="button">Detectar contenido de Blackboard</button>
-      <p id="status" class="status" role="status">Abre el contenido del curso en Blackboard y detecta para comenzar.</p>
+      <button id="scan" class="primary" type="button">Detectar contenido</button>
+      <p id="status" class="status" role="status"></p>
 
       <nav class="section-tabs" role="tablist" aria-label="Secciones de la extensión">
-        <button id="tab-classes" class="section-tab" type="button" role="tab" aria-selected="true" aria-controls="section-classes" data-section="classes">Clases <span id="class-count-badge" class="tab-count" hidden></span></button>
-        <button id="tab-files" class="section-tab" type="button" role="tab" aria-selected="false" aria-controls="section-files" data-section="files" tabindex="-1">Archivos <span id="file-count-badge" class="tab-count" hidden></span></button>
-        <button id="tab-downloads" class="section-tab" type="button" role="tab" aria-selected="false" aria-controls="section-downloads" data-section="downloads" tabindex="-1">Descargas <span id="download-count-badge" class="tab-count" hidden></span></button>
+        <button id="tab-classes" class="section-tab" type="button" role="tab" aria-selected="true" aria-controls="section-classes" data-section="classes">Clases</button>
+        <button id="tab-files" class="section-tab" type="button" role="tab" aria-selected="false" aria-controls="section-files" data-section="files" tabindex="-1">Archivos</button>
+        <button id="tab-downloads" class="section-tab" type="button" role="tab" aria-selected="false" aria-controls="section-downloads" data-section="downloads" tabindex="-1">Descargas</button>
       </nav>
 
       <div id="workspace-tools" class="workspace-tools">
         <div id="search-controls">
-          <label for="content-search">Buscar clases o archivos</label>
-          <input id="content-search" type="search" autocomplete="off" placeholder="Ej.: Clase 3, excepciones.pdf">
-          <p id="search-summary" class="search-summary" aria-live="polite">La búsqueda se aplicará a las clases y los archivos detectados.</p>
+          <label class="visually-hidden" for="content-search">Buscar clases o archivos</label>
+          <input id="content-search" type="search" autocomplete="off" placeholder="Buscar clase o archivo">
         </div>
-        <p id="selection-summary" class="selection-summary" role="status">0 archivos seleccionados.</p>
       </div>
 
       <section id="section-classes" class="section-panel" role="tabpanel" aria-labelledby="tab-classes">
         <div class="section-heading">
-          <span class="step-label">PASO 1</span>
           <h2>Abrir clases</h2>
-          <p class="muted">Abre las carpetas cerradas para que Blackboard muestre su contenido.</p>
         </div>
-        <p id="classes-empty" class="empty-state">Primero detecta el contenido del curso en Blackboard.</p>
+        <p id="classes-empty" class="empty-state">Sin clases detectadas.</p>
         <section id="class-opener" class="class-opener" hidden>
           <label class="select-all-row opener-select-all">
             <input id="open-all-classes" type="checkbox">
@@ -56,22 +50,19 @@
 
       <section id="section-files" class="section-panel" role="tabpanel" aria-labelledby="tab-files" hidden>
         <div class="section-heading">
-          <span class="step-label">PASO 2</span>
-          <h2>Elegir archivos</h2>
-          <p class="muted">Marca archivos individuales o una clase completa.</p>
+          <h2>Archivos del curso</h2>
         </div>
         <section id="results" class="results" aria-live="polite">
-          <p class="muted">Aún no he leído la pestaña.</p>
+          <p class="muted">Sin contenido detectado.</p>
         </section>
+        <p id="file-search-empty" class="empty-state compact" hidden>No encontré archivos con ese nombre.</p>
       </section>
 
       <section id="section-downloads" class="section-panel" role="tabpanel" aria-labelledby="tab-downloads" hidden>
         <div class="section-heading">
-          <span class="step-label">PASO 3</span>
-          <h2>Descargar material</h2>
-          <p class="muted">Elige cómo ordenar los archivos y revisa el progreso de Edge.</p>
+          <h2>Descargas</h2>
         </div>
-        <p id="downloads-empty" class="empty-state">Selecciona archivos en la sección Archivos para iniciar una descarga.</p>
+        <p id="downloads-empty" class="empty-state">Selecciona archivos en Archivos.</p>
         <section id="download-job" class="download-job" aria-live="polite" hidden>
           <div class="job-heading">
             <div>
@@ -96,11 +87,11 @@
             <option value="folder">Carpeta del curso con subcarpetas por clase</option>
             <option value="zip">Un ZIP con subcarpetas por clase</option>
           </select>
-          <p class="format-help">Carpeta: organiza los archivos por clase. ZIP: hasta 100 MB de contenido y sin progreso intermedio.</p>
+          <p id="format-help" class="format-help" hidden>ZIP: hasta 100 MB de contenido.</p>
           <button id="download-selected" class="download" type="button" disabled>Descargar seleccionados</button>
         </section>
       </section>
-      <p class="footnote">v<span id="version"></span> · La selección es temporal. El progreso de carpetas se guarda en este equipo.</p>
+      <p class="footnote">v<span id="version"></span></p>
     </main>
     <script src="popup.js"></script>
   </body>

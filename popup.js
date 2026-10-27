@@ -6,16 +6,13 @@ const openClassesButton = document.getElementById("open-classes-button");
 const openClassesStatus = document.getElementById("open-classes-status");
 const resultsBox = document.getElementById("results");
 const statusBox = document.getElementById("status");
-const selectionSummary = document.getElementById("selection-summary");
 const contentSearch = document.getElementById("content-search");
-const searchSummary = document.getElementById("search-summary");
 const searchControls = document.getElementById("search-controls");
 const classesEmpty = document.getElementById("classes-empty");
 const classSearchEmpty = document.getElementById("class-search-empty");
-const classCountBadge = document.getElementById("class-count-badge");
-const fileCountBadge = document.getElementById("file-count-badge");
-const downloadCountBadge = document.getElementById("download-count-badge");
+const fileSearchEmpty = document.getElementById("file-search-empty");
 const downloadsEmpty = document.getElementById("downloads-empty");
+const formatHelp = document.getElementById("format-help");
 const sectionTabs = [...document.querySelectorAll(".section-tab")];
 const downloadButton = document.getElementById("download-selected");
 const downloadFormat = document.getElementById("download-format");
@@ -41,7 +38,6 @@ let currentClassItems = [];
 let currentFileGroups = [];
 let currentSelectionUpdater = () => {};
 let searchingGroups = false;
-let hasScannedInventory = false;
 let openingClasses = false;
 
 function activateSection(sectionName, focusTab = false) {
@@ -137,17 +133,7 @@ function applyContentSearch() {
   searchingGroups = searching;
 
   classSearchEmpty.hidden = !searching || matchingClasses > 0;
-  if (!hasScannedInventory && !currentClassNames.length && !currentSelectionRecords.length) {
-    searchSummary.textContent = "Detecta el contenido para buscar clases y archivos.";
-  } else if (!searching && !currentClassNames.length && !currentSelectionRecords.length) {
-    searchSummary.textContent = "No hay clases ni archivos detectados en esta vista.";
-  } else if (!searching) {
-    searchSummary.textContent = "Busca por nombre de clase o archivo.";
-  } else if (matchingClasses || matchingFiles) {
-    searchSummary.textContent = `Coincidencias: ${matchingClasses} clase(s) y ${matchingFiles} archivo(s).`;
-  } else {
-    searchSummary.textContent = "No encontré clases ni archivos con ese nombre.";
-  }
+  fileSearchEmpty.hidden = !searching || matchingFiles > 0;
 }
 
 function recordMatchesCurrentFilter(record) {
@@ -159,10 +145,9 @@ function updateDownloadButton() {
   downloadButton.textContent = downloadFormat.value === "zip" ? "Crear y descargar ZIP" : "Descargar seleccionados";
   const folderJobActive = downloadFormat.value === "folder" && latestDownloadJob && latestDownloadJob.status !== "complete";
   downloadButton.disabled = downloadInProgress || Boolean(folderJobActive) || selected.length === 0 || selected.some((record) => !record.url);
+  formatHelp.hidden = downloadFormat.value !== "zip";
   if (!latestDownloadJob) {
-    downloadsEmpty.textContent = selected.length
-      ? `Tienes ${selected.length} archivo(s) seleccionado(s). Elige el formato y pulsa descargar.`
-      : "Selecciona archivos en la sección Archivos para iniciar una descarga.";
+    downloadsEmpty.textContent = selected.length ? "Elige el formato y pulsa descargar." : "Selecciona archivos en Archivos.";
   }
 }
 
@@ -184,7 +169,7 @@ openClassesButton.addEventListener("click", async () => {
 
   openingClasses = true;
   updateOpenClassesButton();
-  openClassesStatus.textContent = `Abriendo ${selectedNames.length} clase(s) en Blackboard…`;
+  openClassesStatus.textContent = "Abriendo las clases seleccionadas…";
   try {
     const [outcome] = await chrome.scripting.executeScript({
       target: { tabId: currentTabId },
@@ -194,17 +179,13 @@ openClassesButton.addEventListener("click", async () => {
     });
     const result = outcome?.result;
     if (!result?.ok) throw new Error(result?.error || "No pude abrir las clases seleccionadas.");
-    const parts = [];
-    if (result.opened) parts.push(`${result.opened} abierta(s)`);
-    if (result.alreadyOpen) parts.push(`${result.alreadyOpen} ya estaba(n) abierta(s)`);
-    if (result.missing) parts.push(`${result.missing} no encontrada(s)`);
-    if (result.failed) parts.push(`${result.failed} no se pudo expandir`);
-    openClassesStatus.textContent = `${parts.join(", ")}. Actualizando archivos visibles…`;
     if (result.opened || result.alreadyOpen) {
+      const partialText = result.missing || result.failed ? " Algunas carpetas no se abrieron." : "";
+      openClassesStatus.textContent = `Actualizando archivos visibles.${partialText}`;
       await new Promise((resolve) => window.setTimeout(resolve, 450));
       scanButton.click();
     } else {
-      openClassesStatus.textContent = `${parts.join(", ")}. No pude localizar un control de carpeta; revisa los logs [DuocClassOpener] en la consola de Blackboard.`;
+      openClassesStatus.textContent = "No pude localizar las carpetas seleccionadas. Revisa la consola de Blackboard.";
     }
   } catch (error) {
     openClassesStatus.textContent = error.message || "No pude abrir las clases seleccionadas.";
@@ -241,7 +222,7 @@ refreshJobLinksButton.addEventListener("click", async () => {
     if (!result?.ok) jobHelp.textContent = result?.error || "No pude actualizar los enlaces.";
     if (result?.job) renderDownloadJob(result.job);
     else await refreshDownloadJob();
-    if (result?.ok) statusBox.textContent = `Actualicé ${result.updated} enlace(s) y envié a Edge las solicitudes pendientes.`;
+    if (result?.ok) statusBox.textContent = "Enlaces actualizados. Descarga reanudada.";
   } catch (error) {
     jobHelp.textContent = error.message || "No pude actualizar los enlaces.";
   } finally {
@@ -261,13 +242,10 @@ clearJobButton.addEventListener("click", async () => {
     const result = await chrome.runtime.sendMessage({ type: "clear-folder-download-job" });
     if (!result?.ok) throw new Error(result?.error || "No pude eliminar la cola.");
     renderDownloadJob(null);
-    const cancelledText = result.cancelled
-      ? ` Cancelé ${result.cancelled} descarga(s) activa(s).`
-      : "";
     const waitingText = result.waitingForSave
       ? ` Cierra cualquier ventana Guardar pendiente de Edge.`
       : "";
-    statusBox.textContent = `Eliminé la cola; los archivos completados se conservaron.${cancelledText}${waitingText}`;
+    statusBox.textContent = `Cola eliminada. Los archivos completados se conservaron.${waitingText}`;
   } catch (error) {
     jobHelp.textContent = error.message || "No pude eliminar la cola.";
   } finally {
@@ -505,8 +483,7 @@ async function getActiveBlackboardTab() {
 
 scanButton.addEventListener("click", async () => {
   activateSection("classes");
-  hasScannedInventory = false;
-  statusBox.textContent = "Leyendo nombres ya cargados en la pestaña…";
+  statusBox.textContent = "Leyendo contenido…";
   classOpener.hidden = true;
   classesEmpty.hidden = false;
   classesEmpty.textContent = "Detectando contenido del curso…";
@@ -518,11 +495,9 @@ scanButton.addEventListener("click", async () => {
   currentSelectionUpdater = () => {};
   searchingGroups = false;
   contentSearch.value = "";
-  classCountBadge.hidden = true;
-  fileCountBadge.hidden = true;
   classSearchEmpty.hidden = true;
+  fileSearchEmpty.hidden = true;
   applyContentSearch();
-  selectionSummary.textContent = "0 archivos seleccionados.";
   updateDownloadButton();
   scanButton.disabled = true;
   try {
@@ -537,7 +512,6 @@ scanButton.addEventListener("click", async () => {
     renderResult(result?.result || { pageTitle: "Título no visible", courseName: "Curso", classes: [], filesWithoutClass: [], fileCount: 0 });
     void refreshDownloadJob();
   } catch (error) {
-    hasScannedInventory = true;
     resultsBox.replaceChildren();
     const message = document.createElement("p");
     message.className = "muted";
@@ -549,10 +523,9 @@ scanButton.addEventListener("click", async () => {
     currentSelectionRecords = [];
     currentClassItems = [];
     currentFileGroups = [];
-    selectionSummary.textContent = "0 archivos seleccionados.";
     applyContentSearch();
     updateDownloadButton();
-    statusBox.textContent = "No se modificó el curso.";
+    statusBox.textContent = "";
     void refreshDownloadJob();
   } finally {
     scanButton.disabled = false;
@@ -593,10 +566,6 @@ function getDownloadUrl(record) {
 
 async function downloadSelectedAsFolders(selected) {
   const courseFolder = sanitizePathSegment(currentCourseName);
-  const selectedClasses = [...new Set(selected
-    .filter((record) => record.folder !== "Archivos sin clase identificada")
-    .map((record) => sanitizePathSegment(record.folder)))];
-  const classLabel = summarizeClassNames(selectedClasses);
   const files = selected.map((record) => {
     const url = getDownloadUrl(record);
     const filename = `${courseFolder}/${sanitizePathSegment(record.folder)}/${sanitizePathSegment(record.name)}`;
@@ -610,8 +579,8 @@ async function downloadSelectedAsFolders(selected) {
   });
   if (!result?.ok) throw new Error(result?.error || "No pude iniciar la cola de descargas.");
   if (result.job) renderDownloadJob(result.job);
-  const needsLinks = result.job?.items?.filter((item) => item.status === "needs-link").length || 0;
-  statusBox.textContent = `Envié a Edge las solicitudes de ${selected.length} archivo(s) para ${selectedClasses.length} clase(s) (${classLabel}). La extensión ya no espera a que termine cada archivo para solicitar el siguiente; Edge aún puede mostrar sus ventanas de Guardar por separado.${needsLinks ? ` ${needsLinks} archivo(s) necesitan un enlace nuevo.` : ""}`;
+  const hasNeedsLinks = result.job?.items?.some((item) => item.status === "needs-link");
+  statusBox.textContent = hasNeedsLinks ? "Algunos archivos necesitan actualizar su enlace." : "Descargas enviadas a Edge.";
 }
 
 async function refreshDownloadJob() {
@@ -627,7 +596,6 @@ function renderDownloadJob(job) {
   if (!job) {
     downloadJobPanel.hidden = true;
     downloadsEmpty.hidden = false;
-    downloadCountBadge.hidden = true;
     jobStatusBadge.textContent = "";
     jobProgress.value = 0;
     updateDownloadButton();
@@ -638,8 +606,6 @@ function renderDownloadJob(job) {
   downloadsEmpty.hidden = true;
   const total = job.items.length;
   const completed = job.items.filter((item) => item.status === "complete").length;
-  downloadCountBadge.textContent = `${completed}/${total}`;
-  downloadCountBadge.hidden = false;
   const activeItems = job.items.filter((item) => item.status === "downloading" || item.status === "starting");
   const active = activeItems.find((item) => item.status === "downloading") || activeItems[0];
   const resumable = job.items.filter((item) => item.canResume && ["paused", "interrupted"].includes(item.status));
@@ -752,12 +718,6 @@ function jobItemStatus(item) {
   return item.pathChanged ? `${labels[item.status] || item.status} · ruta cambiada` : labels[item.status] || item.status;
 }
 
-function summarizeClassNames(names) {
-  if (!names.length) return "sin clase identificada";
-  if (names.length <= 2) return names.join(", ");
-  return `${names[0]}, ${names[1]} y ${names.length - 2} más`;
-}
-
 async function downloadSelectedAsZip(selected) {
   if (!currentTabId) throw new Error("Vuelve a detectar el contenido antes de crear el ZIP.");
   const files = selected.map((record) => ({
@@ -776,7 +736,7 @@ async function downloadSelectedAsZip(selected) {
     }]
   });
   if (!outcome?.result?.ok) throw new Error(outcome?.result?.error || "No pude preparar el ZIP.");
-  statusBox.textContent = `Descarga del ZIP iniciada con ${outcome.result.fileCount} archivo(s), separados por clase.`;
+  statusBox.textContent = "Descarga ZIP iniciada.";
 }
 
 async function buildZipAndDownloadInBlackboardPage(options) {
@@ -976,7 +936,7 @@ function renderClassOpener(classes) {
   openClassesStatus.textContent = "";
   classOpener.hidden = currentClassNames.length === 0;
   classesEmpty.hidden = currentClassNames.length > 0;
-  if (!currentClassNames.length) classesEmpty.textContent = "No encontré carpetas de clase en esta vista. Abre el contenido del curso y vuelve a detectar.";
+  if (!currentClassNames.length) classesEmpty.textContent = "No encontré clases en esta vista.";
   openAllClassesCheckbox.checked = false;
   openAllClassesCheckbox.indeterminate = false;
   openAllClassesCheckbox.disabled = currentClassNames.length === 0;
@@ -1136,40 +1096,23 @@ async function expandSelectedBlackboardFolders(requestedNames) {
 }
 
 function renderResult(result) {
-  hasScannedInventory = true;
   resultsBox.replaceChildren();
   currentCourseName = result.courseName || result.pageTitle || "Curso";
   renderClassOpener(result.classes || []);
-  classCountBadge.textContent = String(result.classes.length);
-  classCountBadge.hidden = result.classes.length === 0;
-  fileCountBadge.textContent = String(result.fileCount || 0);
-  fileCountBadge.hidden = !result.fileCount;
-  const pageTitle = document.createElement("p");
-  pageTitle.className = "summary";
-  pageTitle.textContent = `Vista actual: ${result.pageTitle}`;
-  resultsBox.append(pageTitle);
 
   if (!result.classes.length) {
     const message = document.createElement("p");
     message.className = "muted";
-    message.textContent = "No encontré carpetas con nombre «CLASE N°…» en esta vista. Abre la lista de contenido del curso y vuelve a intentar.";
+    message.textContent = "No encontré clases en esta vista.";
     resultsBox.append(message);
     currentSelectionRecords = [];
     currentFileGroups = [];
     currentSelectionUpdater = () => {};
     applyContentSearch();
-    selectionSummary.textContent = "0 archivos seleccionados.";
     updateDownloadButton();
-    statusBox.textContent = "No se abrió ni modificó nada.";
+    statusBox.textContent = "";
     return;
   }
-
-  const associatedCount = result.classes.reduce((total, item) => total + item.files.length, 0);
-  const classesWithFiles = result.classes.filter((item) => item.files.length).length;
-  const count = document.createElement("p");
-  count.className = "muted";
-  count.textContent = `Encontré ${result.classes.length} clase(s) y ${result.fileCount} nombre(s) de archivo: ${associatedCount} asociado(s) a ${classesWithFiles} clase(s), ${result.filesWithoutClass.length} sin asociación segura.`;
-  resultsBox.append(count);
 
   const fileSelectionRecords = [];
   currentSelectionRecords = fileSelectionRecords;
@@ -1188,7 +1131,7 @@ function renderResult(result) {
   const list = document.createElement("ul");
   list.className = "tree";
 
-  function updateSelectionSummary() {
+  function updateSelectionControls() {
     for (const group of groupStates) {
       if (!group.checkbox) continue;
       const groupRecords = normalizeSearchText(contentSearch.value)
@@ -1198,12 +1141,6 @@ function renderResult(result) {
       group.checkbox.checked = groupRecords.length > 0 && selectedInGroup === groupRecords.length;
       group.checkbox.indeterminate = selectedInGroup > 0 && selectedInGroup < groupRecords.length;
     }
-    const selected = fileSelectionRecords.filter((record) => record.checkbox.checked);
-    const withoutLinkCount = selected.filter((record) => !record.url).length;
-    const selectedClasses = new Set(selected
-      .filter((record) => record.folder !== "Archivos sin clase identificada")
-      .map((record) => record.folder));
-    selectionSummary.textContent = `${selected.length} archivo(s) seleccionado(s) de ${selectedClasses.size} clase(s).${withoutLinkCount ? ` ${withoutLinkCount} sin enlace directo.` : ""}`;
     const filteredRecords = fileSelectionRecords.filter(recordMatchesCurrentFilter);
     const selectedFilteredRecords = filteredRecords.filter((record) => record.checkbox.checked);
     selectAll.disabled = filteredRecords.length === 0;
@@ -1262,10 +1199,6 @@ function renderResult(result) {
     groupName.textContent = title;
     label.prepend(groupCheckbox);
     label.append(groupName);
-    const groupCount = document.createElement("span");
-    groupCount.className = "tree-count";
-    groupCount.textContent = `${files.length}`;
-    label.append(groupCount);
     row.append(toggle, label);
 
     const children = document.createElement("ul");
@@ -1280,18 +1213,21 @@ function renderResult(result) {
       fileRow.className = "tree-file-row";
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
-      checkbox.addEventListener("change", updateSelectionSummary);
+      checkbox.addEventListener("change", updateSelectionControls);
       const fileRecord = { checkbox, name: fileName, folder, url: fileUrl, mode: fileMode, element: fileItem, group };
       group.childRecords.push(fileRecord);
       fileSelectionRecords.push(fileRecord);
       const fileLabel = document.createElement("span");
       fileLabel.className = "file-name";
       fileLabel.textContent = fileName;
-      const linkStatus = document.createElement("span");
-      linkStatus.className = fileUrl ? "download-status ready" : "download-status missing";
-      linkStatus.textContent = fileUrl ? "enlace listo" : "sin enlace";
-      linkStatus.title = fileUrl ? "Blackboard expuso un enlace directo para este archivo." : "No encontré un enlace directo seguro en esta vista.";
-      fileRow.append(checkbox, fileLabel, linkStatus);
+      fileRow.append(checkbox, fileLabel);
+      if (!fileUrl) {
+        const linkStatus = document.createElement("span");
+        linkStatus.className = "download-status missing";
+        linkStatus.textContent = "sin enlace";
+        linkStatus.title = "No encontré un enlace directo seguro en esta vista.";
+        fileRow.append(linkStatus);
+      }
       fileItem.append(fileRow);
       children.append(fileItem);
     }
@@ -1301,7 +1237,7 @@ function renderResult(result) {
         ? group.childRecords.filter(recordMatchesCurrentFilter)
         : group.childRecords;
       for (const record of groupRecords) record.checkbox.checked = groupCheckbox.checked;
-      updateSelectionSummary();
+      updateSelectionControls();
     });
     toggle.addEventListener("click", () => {
       children.hidden = !children.hidden;
@@ -1312,7 +1248,7 @@ function renderResult(result) {
 
     item.append(row, children);
     list.append(item);
-    updateSelectionSummary();
+    updateSelectionControls();
   }
 
   for (const classEntry of result.classes) {
@@ -1326,16 +1262,16 @@ function renderResult(result) {
   }
   selectAll.addEventListener("change", () => {
     for (const record of fileSelectionRecords.filter(recordMatchesCurrentFilter)) record.checkbox.checked = selectAll.checked;
-    updateSelectionSummary();
+    updateSelectionControls();
   });
   resultsBox.append(list);
-  currentSelectionUpdater = updateSelectionSummary;
+  currentSelectionUpdater = updateSelectionControls;
   applyContentSearch();
-  updateSelectionSummary();
-  const readyCount = fileSelectionRecords.filter((record) => record.url).length;
-  statusBox.textContent = readyCount
-    ? `${readyCount} de ${fileSelectionRecords.length} archivo(s) tiene(n) enlace directo. Las descargas empiezan solo al pulsar el botón.`
+  updateSelectionControls();
+  const hasReadyLink = fileSelectionRecords.some((record) => record.url);
+  statusBox.textContent = hasReadyLink
+    ? ""
     : result.fileCount
-      ? "Encontré los nombres, pero Blackboard no expuso enlaces directos seguros en esta vista. No habilité la descarga para evitar guardar páginas del visor como archivos."
-      : "No encontré archivos visibles. Abre manualmente una clase y vuelve a detectar.";
+      ? "Sin enlaces directos. Abre la clase en Blackboard y vuelve a detectar."
+      : "";
 }
